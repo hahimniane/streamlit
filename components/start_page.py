@@ -76,8 +76,7 @@ def render_start_page(project_dir: str):
         Available analyses include:
         - 🌊 **PFAS Upstream Tracing**: Trace potential contamination sources upstream
         - ⬇️ **PFAS Downstream Tracing**: Explore downstream transport and impacts
-        - 🏭 **Samples Near Facilities**: Find contaminated samples near industrial facilities
+        - 🏭 **Samples Near Facilities**: Find PFAS samples near industrial facilities
         """)
         
         st.markdown("<br>", unsafe_allow_html=True)
-

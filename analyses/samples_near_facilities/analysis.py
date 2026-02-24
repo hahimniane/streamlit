@@ -34,9 +34,9 @@ def main(context: AnalysisContext) -> None:
     **What this analysis does:**
     - Find all facilities of a specific industry type (optionally filtered by region)
     - Expand search to neighboring areas
-    - Identify contaminated samples near those facilities
+    - Identify PFAS samples near those facilities
 
-    **3-Step Process:** Find facilities -> Expand to neighboring areas -> Identify contaminated samples
+    **3-Step Process:** Find facilities -> Expand to neighboring areas -> Identify PFAS samples
 
     **Use case:** Determine if PFAS contamination exists near specific industries
     """)
@@ -90,11 +90,11 @@ def main(context: AnalysisContext) -> None:
         with executor.step(2, "Expanding to neighboring areas...") as step:
             step.success("Step 2: Expanded to neighboring areas")
 
-        with executor.step(3, "Finding contaminated samples...") as step:
+        with executor.step(3, "Finding PFAS samples...") as step:
             if not samples_df.empty:
-                step.success(f"Step 3: Found {len(samples_df)} contaminated samples")
+                step.success(f"Step 3: Found {len(samples_df)} PFAS samples")
             else:
-                step.info("Step 3: No contaminated samples found")
+                step.info("Step 3: No PFAS samples found")
 
         boundaries = fetch_boundaries(context.selected_state_code, context.selected_county_code)
 
@@ -143,7 +143,7 @@ def main(context: AnalysisContext) -> None:
 
         # Step 2: Samples
         if not samples_df.empty:
-            st.markdown("### Step 2: Contaminated Samples")
+            st.markdown("### Step 2: PFAS Samples")
             metrics = [{"label": "Total Samples", "value": len(samples_df)}]
             if 'sp' in samples_df.columns:
                 metrics.append({"label": "Unique Sample Points", "value": samples_df['sp'].nunique()})
@@ -210,7 +210,7 @@ def _render_map(facilities_df, samples_df, industry_display, boundaries, query_r
                 samples_gdf = samples_gdf.drop(columns=[c for c in ["results", "dates"] if c in samples_gdf.columns], errors="ignore")
                 sample_fields = [c for c in ["resultCount", "max", "datedresults", "Materials", "Type", "spName"] if c in samples_gdf.columns]
                 add_point_layer(map_obj, samples_gdf,
-                    name=f'<span style="color:DarkOrange;">Contaminated Samples ({len(samples_gdf)})</span>',
+                    name=f'<span style="color:DarkOrange;">PFAS Samples ({len(samples_gdf)})</span>',
                     color='DarkOrange', popup_fields=sample_fields, radius=6,
                     popup_kwds={'max_height': 450, 'max_width': 450})
 
@@ -219,7 +219,7 @@ def _render_map(facilities_df, samples_df, industry_display, boundaries, query_r
         render_map_legend([
             "**Boundary** = Selected region",
             "**Blue markers** = Facilities of selected industry type",
-            "**Orange markers** = Contaminated sample points nearby"
+            "**Orange markers** = PFAS sample points nearby"
         ])
 
     except Exception as e:

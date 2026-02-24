@@ -101,7 +101,7 @@ class TestRunUpstream(unittest.TestCase):
         self.assertEqual(len(facilities_df), 1)
         self.assertTrue(up_s2.empty)
         self.assertEqual(len(executed), 3)
-        self.assertEqual(executed[0].get("label"), "Step 1: Contaminated Samples")
+        self.assertEqual(executed[0].get("label"), "Step 1: PFAS Samples")
         self.assertEqual(executed[1].get("label"), "Step 2: Upstream Flowlines")
         self.assertEqual(executed[2].get("label"), "Step 3: Upstream Facilities")
         for i, eq in enumerate(executed):

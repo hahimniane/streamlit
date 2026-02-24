@@ -41,9 +41,9 @@ def main(context: AnalysisContext) -> None:
     **What this analysis does:**
     - Finds facilities of a specific industry type in your selected region
     - Traces *downstream* through hydrological flow paths from those facilities
-    - Identifies contaminated sample points downstream
+    - Identifies PFAS sample points downstream
 
-    **3-Step Process:** Find facilities -> Trace downstream -> Identify contaminated samples
+    **3-Step Process:** Find facilities -> Trace downstream -> Identify PFAS samples
 
     **Use case:** Determine if PFAS contamination flows downstream from specific industries
     """)
@@ -305,7 +305,7 @@ def _render_map(facilities_df, streams_df, samples_df, boundaries, context) -> N
     st_folium(map_obj, width=None, height=700, returned_objects=[])
     render_map_legend([
         "**Boundary outline** = Selected region",
-        "**Orange circles** = Contaminated samples downstream",
+        "**Orange circles** = PFAS samples downstream",
         "**Light blue lines** = Downstream flow paths",
         "**Purple/pink markers** = Facilities (by industry)"
     ])

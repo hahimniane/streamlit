@@ -167,9 +167,9 @@ def main(context: AnalysisContext) -> None:
 
             with executor.step(1, "Step 1") as step:
                 if not samples_df.empty:
-                    step.success(f"Found {len(samples_df)} contaminated samples")
+                    step.success(f"Found {len(samples_df)} PFAS samples")
                 else:
-                    step.warning("No contaminated samples found")
+                    step.warning("No PFAS samples found")
             with executor.step(2, "Step 2") as step:
                 n_fl = len(upstream_flowlines_df)
                 if n_fl:
@@ -220,14 +220,14 @@ def main(context: AnalysisContext) -> None:
 
         # Step 1 Results
         if not samples_df.empty:
-            st.markdown("### Step 1: Contaminated Samples")
+            st.markdown("### Step 1: PFAS Samples")
             metrics = [{"label": "Total Samples", "value": len(samples_df)}]
             if 'sp' in samples_df.columns:
                 metrics.append({"label": "Unique Sample Points", "value": samples_df['sp'].nunique()})
             if 'matType' in samples_df.columns:
                 metrics.append({"label": "Material Type", "value": saved_material_name or "All"})
             render_metrics_row(metrics, num_columns=len(metrics))
-            render_data_expander("View Contaminated Samples Data", samples_df,
+            render_data_expander("View PFAS Samples Data", samples_df,
                 download_filename=f"contaminated_samples_{query_region_code}.csv",
                 download_key=f"download_{context.analysis_key}_samples")
 
@@ -316,7 +316,7 @@ def _render_map(samples_df, facilities_df, upstream_s2_df, upstream_flowlines_df
 
     if samples_gdf is not None and not samples_gdf.empty:
         fields = [c for c in ["sp", "result_value", "substance", "matType", "regionURI"] if c in samples_gdf.columns]
-        add_point_layer(map_obj, samples_gdf, '<span style="color:DarkOrange;">Contaminated Samples</span>',
+        add_point_layer(map_obj, samples_gdf, '<span style="color:DarkOrange;">PFAS Samples</span>',
                         'DarkOrange', popup_fields=fields, radius=8)
 
     if facilities_gdf is not None and not facilities_gdf.empty:
@@ -331,7 +331,7 @@ def _render_map(samples_df, facilities_df, upstream_s2_df, upstream_flowlines_df
     finalize_map(map_obj)
     st_folium(map_obj, width=None, height=600, returned_objects=[])
     render_map_legend([
-        "**Orange circles** = Contaminated sample locations",
+        "**Orange circles** = PFAS sample locations",
         "**Blue lines** = Upstream flow paths",
         "**Colored markers** = Upstream facilities (by industry)",
         "**Boundary outline** = Selected region"

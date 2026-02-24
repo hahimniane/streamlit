@@ -133,7 +133,7 @@ SELECT (COUNT(DISTINCT ?subVal) as ?resultCount) (MAX(?result_value) as ?maxResu
 """
     js1, err1, dbg1 = post_sparql_with_debug("federation", q1, timeout=timeout)
     executed_queries.append({
-        "label": "Step 1: Contaminated Samples",
+        "label": "Step 1: PFAS Samples",
         "endpoint": dbg1.get("endpoint"),
         "response_status": dbg1.get("response_status"),
         "row_count": len(parse_sparql_results(js1)) if js1 else 0,

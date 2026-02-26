@@ -375,7 +375,7 @@ def _render_map(samples_df, facilities_df, upstream_s2_df, upstream_flowlines_df
 
     if flowlines_gdf is not None and not flowlines_gdf.empty:
         add_line_layer(map_obj, flowlines_gdf, '<span style="color:DodgerBlue;">Upstream Flowlines</span>',
-                       'DodgerBlue', weight=2, opacity=0.5)
+                       'DodgerBlue', weight=3, opacity=0.5)
 
     if samples_gdf is not None and not samples_gdf.empty:
         fields = [c for c in ["sp", "result_value", "substance", "matType", "regionURI"] if c in samples_gdf.columns]

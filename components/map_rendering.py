@@ -324,7 +324,7 @@ def add_line_layer(
     gdf: gpd.GeoDataFrame,
     name: str,
     color: str,
-    weight: int = 2,
+    weight: int = 3,
     opacity: float = 0.5,
     popup_fields: List[str] = None,
     show: bool = True
@@ -364,11 +364,12 @@ def add_grouped_point_layers(
     colors: List[str] = None,
     radius: int = FACILITY_MARKER_RADIUS,
     name_template: str = "{group} ({count})",
-    popup_kwds: Dict = None
+    popup_kwds: Dict = None,
 ) -> None:
     """
     Add multiple point layers, one for each unique value in a grouping column.
-    Useful for showing facilities by industry type with different colors.
+    Each layer name is tagged with class="facility-layer" so the bulk toggle
+    button (added via add_facility_toggle_button) can find them all at once.
 
     Args:
         map_obj: Folium map to add layers to
@@ -387,7 +388,7 @@ def add_grouped_point_layers(
         # Fallback: add as single layer
         add_point_layer(
             map_obj, gdf, "Facilities", "Purple",
-            popup_fields=popup_fields, radius=radius, popup_kwds=popup_kwds
+            popup_fields=popup_fields, radius=radius, popup_kwds=popup_kwds,
         )
         return
 
@@ -404,7 +405,7 @@ def add_grouped_point_layers(
 
         add_point_layer(
             map_obj, group_gdf, colored_name, color,
-            popup_fields=popup_fields, radius=radius, popup_kwds=popup_kwds
+            popup_fields=popup_fields, radius=radius, popup_kwds=popup_kwds,
         )
 
 

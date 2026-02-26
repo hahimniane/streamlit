@@ -43,7 +43,8 @@ def render_data_expander(
     download_filename: Optional[str] = None,
     download_key: Optional[str] = None,
     show_stats: bool = False,
-    stats_column: Optional[str] = None
+    stats_column: Optional[str] = None,
+    column_config: Optional[Dict] = None,
 ) -> None:
     """
     Render an expander with a dataframe, optional download button, and optional statistics.
@@ -56,6 +57,7 @@ def render_data_expander(
         download_key: Unique key for the download button
         show_stats: Whether to show concentration statistics
         stats_column: Column name for statistics (e.g., 'max', 'Max')
+        column_config: Optional dict of st.column_config overrides for st.dataframe
     """
     if df is None or df.empty:
         return
@@ -65,11 +67,11 @@ def render_data_expander(
         if display_columns:
             available_cols = [c for c in display_columns if c in df.columns]
             if available_cols:
-                st.dataframe(df[available_cols], use_container_width=True)
+                st.dataframe(df[available_cols], use_container_width=True, column_config=column_config)
             else:
-                st.dataframe(df, use_container_width=True)
+                st.dataframe(df, use_container_width=True, column_config=column_config)
         else:
-            st.dataframe(df, use_container_width=True)
+            st.dataframe(df, use_container_width=True, column_config=column_config)
 
         # Show statistics if requested
         if show_stats and stats_column and stats_column in df.columns:
@@ -108,7 +110,8 @@ def render_step_results(
     download_filename: Optional[str] = None,
     download_key: Optional[str] = None,
     show_stats: bool = False,
-    stats_column: Optional[str] = None
+    stats_column: Optional[str] = None,
+    column_config: Optional[Dict] = None,
 ) -> None:
     """
     Render a complete step result section with title, metrics, and data expander.
@@ -123,6 +126,7 @@ def render_step_results(
         download_key: Unique key for download button
         show_stats: Whether to show statistics
         stats_column: Column for statistics
+        column_config: Optional dict of st.column_config overrides for st.dataframe
     """
     if df is None or df.empty:
         return
@@ -136,7 +140,8 @@ def render_step_results(
         download_filename=download_filename,
         download_key=download_key,
         show_stats=show_stats,
-        stats_column=stats_column
+        stats_column=stats_column,
+        column_config=column_config,
     )
 
 

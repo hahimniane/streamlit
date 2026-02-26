@@ -5,8 +5,9 @@ Industry (NAICS) Filtering and Selection
 """
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 import streamlit as st
+from core.data_loader import load_naics_dict
 
 # Import st_ant_tree for dropdown tree selector
 try:
@@ -189,6 +190,51 @@ def render_hierarchical_naics_selector(
             multi_select=multi_select,
             allow_empty=allow_empty,
         )
+
+
+def format_naics_display(
+    selected_naics_code: Optional[str],
+    naics_dict: Dict[str, str],
+    empty_label: str = "All Industries",
+) -> str:
+    """Format selected NAICS code for parameter display."""
+    if not selected_naics_code:
+        return empty_label
+    return f"{selected_naics_code} - {naics_dict.get(selected_naics_code, 'Unknown')}"
+
+
+def render_sidebar_industry_selector(
+    analysis_key: str,
+    heading: str = "### Industry Type",
+    caption: Optional[str] = None,
+    allow_empty: bool = True,
+    empty_label: str = "All Industries",
+) -> Tuple[str, str]:
+    """
+    Render a standardized sidebar NAICS selector and return selected code + display label.
+
+    Returns:
+        (selected_naics_code, selected_industry_display)
+    """
+    naics_dict = load_naics_dict()
+    st.sidebar.markdown(heading)
+    if caption:
+        st.sidebar.markdown(caption)
+
+    selected_naics_code = render_hierarchical_naics_selector(
+        naics_dict=naics_dict,
+        key=f"{analysis_key}_industry_selector",
+        default_value=None,
+        allow_empty=allow_empty,
+    )
+    if isinstance(selected_naics_code, list):
+        selected_naics_code = selected_naics_code[0] if selected_naics_code else ""
+    selected_industry_display = format_naics_display(
+        selected_naics_code=selected_naics_code,
+        naics_dict=naics_dict,
+        empty_label=empty_label,
+    )
+    return selected_naics_code, selected_industry_display
 
 
 def _render_fallback_selector(

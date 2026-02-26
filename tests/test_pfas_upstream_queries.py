@@ -30,6 +30,13 @@ def _binding(**kwargs) -> dict:
 class TestRunUpstream(unittest.TestCase):
     """run_upstream: 3 self-contained federation queries."""
 
+    @staticmethod
+    def _set_three_empty_success(mock_post):
+        response = MagicMock()
+        response.status_code = 200
+        response.json.return_value = _sparql_json([], [])
+        mock_post.side_effect = [response, response, response]
+
     def test_returns_error_when_region_empty(self):
         samples_df, up_s2, up_fl, facilities_df, executed, err = upstream_queries.run_upstream(
             substance_uri=None,
@@ -170,6 +177,86 @@ class TestRunUpstream(unittest.TestCase):
         self.assertEqual(len(executed), 1)
         self.assertIn("Network error", err)
         self.assertIsNotNone(executed[0].get("error") or executed[0].get("exception"))
+
+    @patch("core.sparql.requests.post")
+    def test_step3_query_has_no_naics_values_when_filter_not_selected(self, mock_post):
+        self._set_three_empty_success(mock_post)
+
+        _, _, _, _, executed, err = upstream_queries.run_upstream(
+            substance_uri=None,
+            material_uri=None,
+            min_conc=0,
+            max_conc=500,
+            region_code="23",
+            include_nondetects=False,
+            naics_code=None,
+        )
+
+        self.assertIsNone(err)
+        q3 = executed[2]["query"]
+        self.assertNotIn("VALUES ?industrySector", q3)
+        self.assertNotIn("VALUES ?industrySubsector", q3)
+        self.assertNotIn("VALUES ?industryGroup", q3)
+        self.assertNotIn("VALUES ?industryCode {naics:NAICS-", q3)
+
+    @patch("core.sparql.requests.post")
+    def test_step3_query_includes_hierarchy_when_sector_filter_selected(self, mock_post):
+        self._set_three_empty_success(mock_post)
+
+        _, _, _, _, executed, err = upstream_queries.run_upstream(
+            substance_uri=None,
+            material_uri=None,
+            min_conc=0,
+            max_conc=500,
+            region_code="23",
+            include_nondetects=False,
+            naics_code="31",
+        )
+
+        self.assertIsNone(err)
+        q3 = executed[2]["query"]
+        self.assertIn("VALUES ?industrySector {naics:NAICS-31}.", q3)
+        self.assertIn("?industryGroup fio:subcodeOf ?industrySubsector .", q3)
+        self.assertIn("?industrySubsector fio:subcodeOf ?industrySector .", q3)
+
+    @patch("core.sparql.requests.post")
+    def test_step3_query_includes_exact_values_for_industry_code(self, mock_post):
+        self._set_three_empty_success(mock_post)
+
+        _, _, _, _, executed, err = upstream_queries.run_upstream(
+            substance_uri=None,
+            material_uri=None,
+            min_conc=0,
+            max_conc=500,
+            region_code="23",
+            include_nondetects=False,
+            naics_code="332311",
+        )
+
+        self.assertIsNone(err)
+        q3 = executed[2]["query"]
+        self.assertIn("VALUES ?industryCode {naics:NAICS-332311}.", q3)
+        self.assertIn("?industryCode a naics:NAICS-IndustryCode ;", q3)
+
+    @patch("core.sparql.requests.post")
+    def test_step3_query_ignores_invalid_non_numeric_naics_code(self, mock_post):
+        self._set_three_empty_success(mock_post)
+
+        _, _, _, _, executed, err = upstream_queries.run_upstream(
+            substance_uri=None,
+            material_uri=None,
+            min_conc=0,
+            max_conc=500,
+            region_code="23",
+            include_nondetects=False,
+            naics_code="31-33",
+        )
+
+        self.assertIsNone(err)
+        q3 = executed[2]["query"]
+        self.assertNotIn("NAICS-31-33", q3)
+        self.assertNotIn("VALUES ?industrySector", q3)
+        self.assertNotIn("?industryCode a naics:NAICS-IndustryCode ;", q3)
 
 
 if __name__ == "__main__":

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from typing import List
 import pandas as pd
+import streamlit as st
 
 from core.sparql import ENDPOINT_URLS, parse_sparql_results, execute_sparql_query
 
@@ -87,6 +88,15 @@ SELECT DISTINCT ?matType ?matTypeLabel WHERE {{
         df["matType"].apply(_fallback_material_name),
     )
     return df[["matType", "display_name"]].reset_index(drop=True)
+
+
+@st.cache_data(ttl=3600)
+def get_cached_material_types_with_labels(
+    region_code: str,
+    is_subdivision: bool = False,
+) -> pd.DataFrame:
+    """Cached wrapper for region-scoped sample material availability."""
+    return get_available_material_types_with_labels(region_code, is_subdivision)
 
 
 def get_available_material_types(region_code: str, is_subdivision: bool = False) -> List[str]:

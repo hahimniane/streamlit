@@ -14,16 +14,25 @@ from analyses.pfas_downstream.queries import (
     execute_downstream_streams_query,
     execute_downstream_samples_query,
 )
-from core.data_loader import load_naics_dict
-from filters.industry import render_hierarchical_naics_selector
+from filters.industry import render_sidebar_industry_selector
 from filters.concentration import render_concentration_filter, apply_concentration_filter
 
 # Shared components
 from core.boundary import fetch_boundaries
 from core.geometry import create_geodataframe
-from components.parameter_display import render_parameter_table
+from core.sparql import build_query_debug_entry
+from components.parameter_display import (
+    build_concentration_params,
+    build_industry_params,
+    build_region_params,
+    render_parameter_table,
+)
 from components.result_display import render_metrics_row, render_data_expander, clean_unit_encoding
 from components.map_rendering import (
+    FACILITY_MARKER_RADIUS,
+    add_facility_link_column,
+    add_naics_link_column,
+    add_naics_url_column,
     create_base_map, add_boundary_layers, add_line_layer,
     add_grouped_point_layers, finalize_map, render_map_legend
 )
@@ -31,6 +40,15 @@ from components.execute_button import render_execute_button, check_required_fiel
 from components.analysis_state import AnalysisState, check_old_session_keys
 from components.step_execution import StepExecutor
 from components.query_debug import render_executed_queries
+from components.eta_display import (
+    render_simple_eta,
+)
+from core.runtime_eta import (
+    build_eta_request,
+    estimate_eta,
+    naics_prefix2_from_code,
+    record_executed_query_batch,
+)
 
 
 def main(context: AnalysisContext) -> None:
@@ -52,19 +70,12 @@ def main(context: AnalysisContext) -> None:
     state.init_if_missing("executed_queries", [])
 
     # === SIDEBAR PARAMETERS ===
-    naics_dict = load_naics_dict()
-    st.sidebar.markdown("### Industry Type")
-    st.sidebar.markdown("_Required: select an industry to trace downstream_")
-    selected_naics_code = render_hierarchical_naics_selector(
-        naics_dict=naics_dict,
-        key=f"{context.analysis_key}_industry_selector",
-        default_value=None,
+    selected_naics_code, selected_industry_display = render_sidebar_industry_selector(
+        analysis_key=context.analysis_key,
+        heading="### Industry Type",
+        caption="_Required: select an industry to trace downstream_",
         allow_empty=True,
-    )
-
-    selected_industry_display = (
-        f"{selected_naics_code} - {naics_dict.get(selected_naics_code, 'Unknown')}"
-        if selected_naics_code else "Not Selected"
+        empty_label="Not Selected",
     )
 
     conc_filter = render_concentration_filter(context.analysis_key)
@@ -77,6 +88,19 @@ def main(context: AnalysisContext) -> None:
         help_text="Execute the downstream tracing analysis" if can_execute else None
     )
 
+    preview_request = build_eta_request(
+        analysis_key=context.analysis_key,
+        region_code=context.region_code,
+        state_code=context.selected_state_code,
+        min_conc=conc_filter.min_concentration,
+        max_conc=conc_filter.max_concentration,
+        include_nondetects=conc_filter.include_nondetects,
+        naics_prefix2=naics_prefix2_from_code(selected_naics_code),
+        has_substance_filter=False,
+        has_material_filter=False,
+    )
+    render_simple_eta(estimate_eta(preview_request))
+
     # === QUERY EXECUTION ===
     if execute_clicked:
         min_conc, max_conc, include_nondetects = apply_concentration_filter(context.analysis_key)
@@ -87,33 +111,48 @@ def main(context: AnalysisContext) -> None:
             boundaries = fetch_boundaries(context.selected_state_code, context.selected_county_code)
 
             params_data = [
-                {"Parameter": "Industry Type", "Value": selected_industry_display},
-                {"Parameter": "Geographic Region", "Value": context.region_display or "All Regions"},
-                {"Parameter": "Detected Concentration", "Value": f"{min_conc} - {max_conc} ng/L"},
+                build_industry_params(selected_industry_display),
+                build_region_params(context.region_display, default_label="All Regions"),
+                build_concentration_params(min_conc, max_conc, include_nondetects=False),
                 {"Parameter": "Include nondetects", "Value": "Yes" if include_nondetects else "No"},
             ]
 
             st.markdown("---")
             st.subheader("Query Execution")
 
+            run_request = build_eta_request(
+                analysis_key=context.analysis_key,
+                region_code=context.region_code,
+                state_code=context.selected_state_code,
+                min_conc=min_conc,
+                max_conc=max_conc,
+                include_nondetects=include_nondetects,
+                naics_prefix2=naics_prefix2_from_code(selected_naics_code),
+                has_substance_filter=False,
+                has_material_filter=False,
+            )
+            run_eta = estimate_eta(run_request)
+
             executor = StepExecutor(num_steps=3)
             facilities_df = pd.DataFrame()
             streams_df = pd.DataFrame()
             samples_df = pd.DataFrame()
             executed_queries = []
+            step_eta_by_label = {s.label: s for s in run_eta.step_estimates}
+
+            def _record_step(step_info: dict) -> None:
+                executed_queries.append(step_info)
 
             with executor.step(1, "Finding facilities...") as step:
                 facilities_df, error, debug = execute_downstream_facilities_query(
                     naics_code=selected_naics_code, region_code=context.region_code)
-                executed_queries.append({
-                    "label": "Step 1: Facilities",
-                    "endpoint": (debug or {}).get("endpoint"),
-                    "timeout_sec": (debug or {}).get("timeout_sec"),
-                    "response_status": (debug or {}).get("response_status"),
-                    "row_count": len(facilities_df) if facilities_df is not None else 0,
-                    "error": error or (debug or {}).get("exception"),
-                    "query": (debug or {}).get("query"),
-                })
+                step_info = build_query_debug_entry(
+                    "Step 1: Facilities",
+                    debug,
+                    row_count=len(facilities_df) if facilities_df is not None else 0,
+                    error=error,
+                )
+                _record_step(step_info)
                 if error:
                     step.error(f"Step 1 failed: {error}")
                 elif not facilities_df.empty:
@@ -124,15 +163,13 @@ def main(context: AnalysisContext) -> None:
             with executor.step(2, "Tracing downstream streams...") as step:
                 streams_df, error, debug = execute_downstream_streams_query(
                     naics_code=selected_naics_code, region_code=context.region_code)
-                executed_queries.append({
-                    "label": "Step 2: Downstream Streams",
-                    "endpoint": (debug or {}).get("endpoint"),
-                    "timeout_sec": (debug or {}).get("timeout_sec"),
-                    "response_status": (debug or {}).get("response_status"),
-                    "row_count": len(streams_df) if streams_df is not None else 0,
-                    "error": error or (debug or {}).get("exception"),
-                    "query": (debug or {}).get("query"),
-                })
+                step_info = build_query_debug_entry(
+                    "Step 2: Downstream Streams",
+                    debug,
+                    row_count=len(streams_df) if streams_df is not None else 0,
+                    error=error,
+                )
+                _record_step(step_info)
                 if error:
                     step.error(f"Step 2 failed: {error}")
                 elif not streams_df.empty:
@@ -145,15 +182,13 @@ def main(context: AnalysisContext) -> None:
                 samples_df, error, debug = execute_downstream_samples_query(
                     naics_code=selected_naics_code, region_code=context.region_code,
                     min_conc=min_conc, max_conc=max_conc, include_nondetects=include_nondetects)
-                executed_queries.append({
-                    "label": "Step 3: Downstream Samples",
-                    "endpoint": (debug or {}).get("endpoint"),
-                    "timeout_sec": (debug or {}).get("timeout_sec"),
-                    "response_status": (debug or {}).get("response_status"),
-                    "row_count": len(samples_df) if samples_df is not None else 0,
-                    "error": error or (debug or {}).get("exception"),
-                    "query": (debug or {}).get("query"),
-                })
+                step_info = build_query_debug_entry(
+                    "Step 3: Downstream Samples",
+                    debug,
+                    row_count=len(samples_df) if samples_df is not None else 0,
+                    error=error,
+                )
+                _record_step(step_info)
                 if error:
                     step.error(f"Step 3 failed: {error}")
                 elif not samples_df.empty:
@@ -161,6 +196,11 @@ def main(context: AnalysisContext) -> None:
                 else:
                     step.info("Step 3: No downstream samples found")
 
+            record_executed_query_batch(
+                request=run_request,
+                executed_queries=executed_queries,
+                step_eta_by_label=step_eta_by_label,
+            )
             state.set("executed_queries", executed_queries)
             state.set_results({
                 "facilities_df": facilities_df, "streams_df": streams_df, "samples_df": samples_df,
@@ -195,10 +235,14 @@ def main(context: AnalysisContext) -> None:
             if 'industryName' in facilities_df.columns:
                 metrics.append({"label": "Industry Types", "value": facilities_df['industryName'].nunique()})
             render_metrics_row(metrics, num_columns=2)
-            render_data_expander("View Facilities Data", facilities_df,
-                display_columns=['facilityName', 'industryName', 'industryCode', 'facility'],
+            facilities_table_df = add_naics_url_column(facilities_df)
+            render_data_expander("View Facilities Data", facilities_table_df,
+                display_columns=['facilityName', 'industryName', 'industryCode_url', 'facility'],
                 download_filename=f"downstream_facilities_{query_region_code or 'all'}.csv",
-                download_key=f"download_{context.analysis_key}_facilities")
+                download_key=f"download_{context.analysis_key}_facilities",
+                column_config={"industryCode_url": st.column_config.LinkColumn(
+                    "NAICS Code", display_text=r"code=(\d+)"
+                )})
 
         # Step 2: Streams
         if not streams_df.empty:
@@ -252,10 +296,11 @@ def _render_map(facilities_df, streams_df, samples_df, boundaries, context) -> N
     streams_gdf = create_geodataframe(streams_df, 'dsflWKT') if has_streams else None
     samples_gdf = create_geodataframe(samples_df, 'spWKT') if has_samples else None
 
-    # Add facility links
+    # Add facility links and NAICS code links
     if facilities_gdf is not None and 'facility' in facilities_gdf.columns:
-        facilities_gdf["facility_link"] = facilities_gdf["facility"].apply(
-            lambda x: f'<a href="https://frs-public.epa.gov/ords/frs_public2/fii_query_detail.disp_program_facility?p_registry_id={str(x).split(".")[-1]}" target="_blank">FRS {str(x).split(".")[-1]}</a>' if x else x)
+        facilities_gdf = add_facility_link_column(facilities_gdf)
+    if facilities_gdf is not None and 'industryCode' in facilities_gdf.columns:
+        facilities_gdf = add_naics_link_column(facilities_gdf)
 
     # Clean sample data
     if samples_gdf is not None:
@@ -297,8 +342,8 @@ def _render_map(facilities_df, streams_df, samples_df, boundaries, context) -> N
 
     # Add facilities
     if facilities_gdf is not None and not facilities_gdf.empty:
-        fields = [c for c in ["facility_link", "facilityName", "industryName", "industryCode"] if c in facilities_gdf.columns]
-        add_grouped_point_layers(map_obj, facilities_gdf, 'industryName', popup_fields=fields, radius=3,
+        fields = [c for c in ["facility_link", "facilityName", "industryName", "industryCode_link"] if c in facilities_gdf.columns]
+        add_grouped_point_layers(map_obj, facilities_gdf, 'industryName', popup_fields=fields, radius=FACILITY_MARKER_RADIUS,
                                  popup_kwds={"max_width": 900, "parse_html": True})
 
     finalize_map(map_obj)

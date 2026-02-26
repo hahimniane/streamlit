@@ -13,12 +13,32 @@ from typing import Optional, Tuple
 import pandas as pd
 
 from core.sparql import (
+    build_query_debug_entry,
     concentration_filter_sparql,
     parse_sparql_results,
     post_sparql_with_debug,
     region_pattern_sparql,
     sparql_values_uri,
 )
+from core.naics_utils import build_naics_values_and_hierarchy, normalize_naics_codes
+
+
+def _build_upstream_industry_filter(naics_code: Optional[str]) -> tuple[str, str]:
+    """
+    Build NAICS VALUES/hierarchy fragments for upstream Step 3 facilities filter.
+
+    The upstream selector can emit virtual values like "31-33"; those are treated
+    as invalid here and no industry filter is applied.
+    """
+    codes = normalize_naics_codes(naics_code)
+    if not codes:
+        return "", ""
+
+    code = str(codes[0]).strip()
+    if not code.isdigit() or len(code) < 2 or len(code) > 6:
+        return "", ""
+
+    return build_naics_values_and_hierarchy(code)
 
 
 def run_upstream(
@@ -29,6 +49,7 @@ def run_upstream(
     region_code: str,
     include_nondetects: bool = False,
     timeout: Optional[int] = None,
+    naics_code: Optional[str] = None,
 ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, list, Optional[str]]:
     """
     Run upstream tracing: 3 self-contained federation queries.
@@ -50,6 +71,7 @@ def run_upstream(
     mat_filter = sparql_values_uri("matType", material_uri)
     region_pattern = region_pattern_sparql(region_code)
     conc_filter = concentration_filter_sparql(min_conc, max_conc, include_nondetects)
+    industry_values, industry_hierarchy = _build_upstream_industry_filter(naics_code)
 
     sample_s2_subquery = f"""
     SELECT DISTINCT ?s2cell WHERE {{
@@ -132,14 +154,15 @@ SELECT (COUNT(DISTINCT ?subVal) as ?resultCount) (MAX(?result_value) as ?maxResu
 }} GROUP BY ?sp ?spWKT ?s2cell
 """
     js1, err1, dbg1 = post_sparql_with_debug("federation", q1, timeout=timeout)
-    executed_queries.append({
-        "label": "Step 1: PFAS Samples",
-        "endpoint": dbg1.get("endpoint"),
-        "response_status": dbg1.get("response_status"),
-        "row_count": len(parse_sparql_results(js1)) if js1 else 0,
-        "error": err1 or dbg1.get("exception"),
-        "query": q1,
-    })
+    executed_queries.append(
+        build_query_debug_entry(
+            "Step 1: PFAS Samples",
+            dbg1,
+            row_count=len(parse_sparql_results(js1)) if js1 else 0,
+            error=err1,
+            query=q1,
+        )
+    )
     if err1:
         return samples_df, pd.DataFrame(), upstream_flowlines_df, facilities_df, executed_queries, err1
     samples_df = parse_sparql_results(js1) if js1 else pd.DataFrame()
@@ -190,19 +213,40 @@ WHERE {{
 }}
 """
     js2, err2, dbg2 = post_sparql_with_debug("federation", q2, timeout=timeout)
-    executed_queries.append({
-        "label": "Step 2: Upstream Flowlines",
-        "endpoint": dbg2.get("endpoint"),
-        "response_status": dbg2.get("response_status"),
-        "row_count": len(parse_sparql_results(js2)) if js2 else 0,
-        "error": err2 or dbg2.get("exception"),
-        "query": q2,
-    })
+    executed_queries.append(
+        build_query_debug_entry(
+            "Step 2: Upstream Flowlines",
+            dbg2,
+            row_count=len(parse_sparql_results(js2)) if js2 else 0,
+            error=err2,
+            query=q2,
+        )
+    )
     if err2:
         return samples_df, pd.DataFrame(), upstream_flowlines_df, facilities_df, executed_queries, err2
     upstream_flowlines_df = parse_sparql_results(js2) if js2 else pd.DataFrame()
 
     # Step 3: Upstream facilities
+    if industry_values:
+        facility_industry_pattern = f"""
+    ?facility fio:ofIndustry ?industryGroup ;
+             fio:ofIndustry ?industryCode ;
+             geo:hasGeometry/geo:asWKT ?facWKT ;
+             rdfs:label ?facilityName .
+    ?industryCode a naics:NAICS-IndustryCode ;
+                  fio:subcodeOf ?industryGroup ;
+                  rdfs:label ?industryName .
+    {industry_hierarchy}
+    {industry_values}
+"""
+    else:
+        facility_industry_pattern = """
+    ?facility fio:ofIndustry ?industryCode ;
+             geo:hasGeometry/geo:asWKT ?facWKT ;
+             rdfs:label ?facilityName .
+    ?industryCode rdfs:label ?industryName .
+"""
+
     q3 = f"""
 PREFIX coso: <http://w3id.org/coso/v1/contaminoso#>
 PREFIX geo: <http://www.opengis.net/ont/geosparql#>
@@ -240,21 +284,19 @@ WHERE {{
               rdf:type kwg-ont:S2Cell_Level13 .
     }} }}
     ?s2fl kwg-ont:sfContains ?facility .
-    ?facility fio:ofIndustry ?industryCode ;
-             geo:hasGeometry/geo:asWKT ?facWKT ;
-             rdfs:label ?facilityName .
-    ?industryCode rdfs:label ?industryName .
+    {facility_industry_pattern}
 }}
 """
     js3, err3, dbg3 = post_sparql_with_debug("federation", q3, timeout=timeout)
-    executed_queries.append({
-        "label": "Step 3: Upstream Facilities",
-        "endpoint": dbg3.get("endpoint"),
-        "response_status": dbg3.get("response_status"),
-        "row_count": len(parse_sparql_results(js3)) if js3 else 0,
-        "error": err3 or dbg3.get("exception"),
-        "query": q3,
-    })
+    executed_queries.append(
+        build_query_debug_entry(
+            "Step 3: Upstream Facilities",
+            dbg3,
+            row_count=len(parse_sparql_results(js3)) if js3 else 0,
+            error=err3,
+            query=q3,
+        )
+    )
     if err3:
         return samples_df, pd.DataFrame(), upstream_flowlines_df, facilities_df, executed_queries, err3
     facilities_df = parse_sparql_results(js3) if js3 else pd.DataFrame()

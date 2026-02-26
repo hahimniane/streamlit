@@ -15,12 +15,25 @@ from filters.region import get_region_boundary, add_region_boundary_layers
 # Shared components
 from core.geometry import create_geodataframe, convert_to_centroids
 from components.parameter_display import render_parameter_table
-from components.result_display import render_metrics_row, render_data_expander
-from components.map_rendering import create_base_map, add_point_layer, finalize_map, render_map_legend
+from components.result_display import render_step_results
+from components.map_rendering import (
+    OTHER_FACILITY_MARKER_RADIUS,
+    PFAS_FACILITY_MARKER_RADIUS,
+    create_base_map,
+    add_point_layer,
+    finalize_map,
+    render_map_legend,
+)
 from components.execute_button import render_execute_button
 from components.analysis_state import AnalysisState
 from components.step_execution import StepExecutor
 from components.query_debug import render_executed_queries
+from components.eta_display import render_simple_eta
+from core.runtime_eta import (
+    build_eta_request,
+    estimate_eta,
+    record_executed_query_batch,
+)
 
 
 def main(context: AnalysisContext) -> None:
@@ -49,15 +62,40 @@ def main(context: AnalysisContext) -> None:
         help_text="Execute the SOCKG analysis"
     )
 
+    preview_request = build_eta_request(
+        analysis_key=context.analysis_key,
+        region_code=context.region_code,
+        state_code=context.selected_state_code,
+        min_conc=0,
+        max_conc=0,
+        include_nondetects=False,
+        has_substance_filter=False,
+        has_material_filter=False,
+    )
+    render_simple_eta(estimate_eta(preview_request))
+
     # === QUERY EXECUTION ===
     if execute_clicked:
         st.markdown("---")
         st.subheader("Query Execution")
 
+        run_request = build_eta_request(
+            analysis_key=context.analysis_key,
+            region_code=context.region_code,
+            state_code=context.selected_state_code,
+            min_conc=0,
+            max_conc=0,
+            include_nondetects=False,
+            has_substance_filter=False,
+            has_material_filter=False,
+        )
+        run_eta = estimate_eta(run_request)
+
         executor = StepExecutor(num_steps=2)
         sites_df = pd.DataFrame()
         facilities_df = pd.DataFrame()
         executed_queries = []
+        step_eta_by_label = {s.label: s for s in run_eta.step_estimates}
 
         with executor.step(1, "Retrieving SOCKG locations...") as step:
             sites_df, sites_debug = get_sockg_locations(state_code)
@@ -75,6 +113,11 @@ def main(context: AnalysisContext) -> None:
             else:
                 step.info("Step 2: No facilities found")
 
+        record_executed_query_batch(
+            request=run_request,
+            executed_queries=executed_queries,
+            step_eta_by_label=step_eta_by_label,
+        )
         state.set("executed_queries", executed_queries)
         state.set_results({
             "sites_df": sites_df, "facilities_df": facilities_df,
@@ -114,24 +157,24 @@ def main(context: AnalysisContext) -> None:
 
     # Step 1: SOCKG Locations
     if not sites_df.empty:
-        st.markdown("### Step 1: SOCKG Locations")
-        render_metrics_row([{"label": "Total Locations", "value": len(sites_df)}], num_columns=1)
-        render_data_expander("View SOCKG Locations Data", sites_df,
+        render_step_results("Step 1: SOCKG Locations", sites_df, [{"label": "Total Locations", "value": len(sites_df)}],
+            "View SOCKG Locations Data",
             display_columns=["locationId", "locationDescription", "location"],
             download_filename=f"sockg_locations_{state_code or 'all'}.csv",
-            download_key=f"download_{context.analysis_key}_locations")
+            download_key=f"download_{context.analysis_key}_locations",
+        )
 
     # Step 2: Facilities
     if not facilities_df.empty:
-        st.markdown("### Step 2: Facilities")
-        render_metrics_row([
-            {"label": "Total Facilities", "value": len(facilities_df)},
-            {"label": "PFAS-Related Facilities", "value": pfas_count}
-        ], num_columns=2)
-        render_data_expander("View Facilities Data", facilities_df,
+        render_step_results("Step 2: Facilities", facilities_df, [
+                {"label": "Total Facilities", "value": len(facilities_df)},
+                {"label": "PFAS-Related Facilities", "value": pfas_count},
+            ],
+            "View Facilities Data",
             display_columns=["facilityName", "industrySector", "industrySubsector", "PFASusing", "industries", "locations"],
             download_filename=f"sockg_facilities_{state_code or 'all'}.csv",
-            download_key=f"download_{context.analysis_key}_facilities")
+            download_key=f"download_{context.analysis_key}_facilities",
+        )
 
     # Map
     _render_map(sites_df, facilities_df, region_boundary_df, state_code)
@@ -185,14 +228,14 @@ def _render_map(sites_df, facilities_df, region_boundary_df, state_code) -> None
         if not other_facilities.empty:
             add_point_layer(map_obj, other_facilities,
                 name='<span style="color:MidnightBlue;">Other Facilities</span>', color='MidnightBlue',
-                popup_fields=facility_fields, radius=4,
+                popup_fields=facility_fields, radius=OTHER_FACILITY_MARKER_RADIUS,
                 tooltip_kwds=dict(aliases=facility_fields, localize=True, labels=True, sticky=False, style=tooltip_style_wide),
                 popup_kwds=dict(aliases=facility_fields, localize=True, labels=True, style=tooltip_style_wide))
 
         if not pfas_facilities.empty:
             add_point_layer(map_obj, pfas_facilities,
                 name='<span style="color:DarkRed;">PFAS-Related Facilities</span>', color='DarkRed',
-                popup_fields=pfas_fields, radius=5,
+                popup_fields=pfas_fields, radius=PFAS_FACILITY_MARKER_RADIUS,
                 tooltip_kwds=dict(aliases=pfas_fields, localize=True, labels=True, sticky=False, style=tooltip_style_wide),
                 popup_kwds=dict(aliases=pfas_fields, localize=True, labels=True, style=tooltip_style_wide))
 

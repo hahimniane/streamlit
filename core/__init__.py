@@ -5,6 +5,7 @@ Provides generic utilities for SPARQL operations and data loading.
 from core.sparql import (
     ENDPOINT_URLS,
     ENDPOINTS,
+    build_query_debug_entry,
     concentration_filter_sparql,
     convert_s2_list_to_query_string,
     convertToDataframe,
@@ -31,6 +32,7 @@ __all__ = [
     # SPARQL
     "ENDPOINT_URLS",
     "ENDPOINTS",
+    "build_query_debug_entry",
     "concentration_filter_sparql",
     "convert_s2_list_to_query_string",
     "convertToDataframe",

@@ -9,21 +9,48 @@ import pandas as pd
 from streamlit_folium import st_folium
 
 from analysis_registry import AnalysisContext
-from analyses.samples_near_facilities.queries import execute_nearby_analysis
-from core.data_loader import load_naics_dict
-from filters.industry import render_hierarchical_naics_selector
+from analyses.samples_near_facilities.queries import (
+    execute_nearby_facilities_query,
+    execute_nearby_samples_query,
+)
+from filters.industry import render_sidebar_industry_selector
 from filters.concentration import render_concentration_filter, apply_concentration_filter
 
 # Shared components
 from core.boundary import fetch_boundaries
 from core.geometry import create_geodataframe
-from components.parameter_display import render_parameter_table
-from components.result_display import render_metrics_row, render_data_expander, clean_unit_encoding
-from components.map_rendering import create_base_map, add_boundary_layers, add_point_layer, finalize_map, render_map_legend
+from core.sparql import build_query_debug_entry
+from components.parameter_display import (
+    build_concentration_params,
+    build_industry_params,
+    build_region_params,
+    render_parameter_table,
+)
+from components.result_display import clean_unit_encoding, render_step_results
+from components.map_rendering import (
+    FACILITY_MARKER_RADIUS,
+    add_facility_link_column,
+    add_naics_link_column,
+    add_naics_url_column,
+    create_base_map,
+    add_boundary_layers,
+    add_point_layer,
+    finalize_map,
+    render_map_legend,
+)
 from components.execute_button import render_execute_button
 from components.analysis_state import AnalysisState, check_old_session_keys
 from components.step_execution import StepExecutor
 from components.query_debug import render_executed_queries
+from components.eta_display import (
+    render_simple_eta,
+)
+from core.runtime_eta import (
+    build_eta_request,
+    estimate_eta,
+    naics_prefix2_from_code,
+    record_executed_query_batch,
+)
 
 
 def main(context: AnalysisContext) -> None:
@@ -33,10 +60,9 @@ def main(context: AnalysisContext) -> None:
     st.markdown("""
     **What this analysis does:**
     - Find all facilities of a specific industry type (optionally filtered by region)
-    - Expand search to neighboring areas
     - Identify PFAS samples near those facilities
 
-    **3-Step Process:** Find facilities -> Expand to neighboring areas -> Identify PFAS samples
+    **2-Step Process:** Find facilities -> Identify PFAS samples nearby
 
     **Use case:** Determine if PFAS contamination exists near specific industries
     """)
@@ -45,24 +71,30 @@ def main(context: AnalysisContext) -> None:
     state.init_if_missing("executed_queries", [])
 
     # === SIDEBAR PARAMETERS ===
-    naics_dict = load_naics_dict()
-    st.sidebar.markdown("### Industry Type")
-    st.sidebar.markdown("_Optional: leave empty to search all industries_")
-    selected_naics_code = render_hierarchical_naics_selector(
-        naics_dict=naics_dict,
-        key=f"{context.analysis_key}_industry_selector",
-        default_value=None,
+    selected_naics_code, selected_industry_display = render_sidebar_industry_selector(
+        analysis_key=context.analysis_key,
+        heading="### Industry Type",
+        caption="_Optional: leave empty to search all industries_",
         allow_empty=True,
-    )
-
-    selected_industry_display = (
-        f"{selected_naics_code} - {naics_dict.get(selected_naics_code, 'Unknown')}"
-        if selected_naics_code else "All Industries"
+        empty_label="All Industries",
     )
 
     conc_filter = render_concentration_filter(context.analysis_key)
 
     execute_clicked = render_execute_button(help_text="Execute the nearby facilities analysis")
+
+    preview_request = build_eta_request(
+        analysis_key=context.analysis_key,
+        region_code=context.region_code,
+        state_code=context.selected_state_code,
+        min_conc=conc_filter.min_concentration,
+        max_conc=conc_filter.max_concentration,
+        include_nondetects=conc_filter.include_nondetects,
+        naics_prefix2=naics_prefix2_from_code(selected_naics_code),
+        has_substance_filter=False,
+        has_material_filter=False,
+    )
+    render_simple_eta(estimate_eta(preview_request))
 
     # === QUERY EXECUTION ===
     if execute_clicked:
@@ -71,31 +103,74 @@ def main(context: AnalysisContext) -> None:
         st.markdown("---")
         st.subheader("Query Execution")
 
-        executor = StepExecutor(num_steps=3)
+        run_request = build_eta_request(
+            analysis_key=context.analysis_key,
+            region_code=context.region_code,
+            state_code=context.selected_state_code,
+            min_conc=min_conc,
+            max_conc=max_conc,
+            include_nondetects=include_nondetects,
+            naics_prefix2=naics_prefix2_from_code(selected_naics_code),
+            has_substance_filter=False,
+            has_material_filter=False,
+        )
+        run_eta = estimate_eta(run_request)
+
+        executor = StepExecutor(num_steps=2)
         facilities_df = pd.DataFrame()
         samples_df = pd.DataFrame()
         executed_queries = []
+        step_eta_by_label = {s.label: s for s in run_eta.step_estimates}
+
+        def _record_step(step_info: dict) -> None:
+            executed_queries.append(step_info)
 
         with executor.step(1, "Finding facilities...") as step:
-            facilities_df, samples_df, debug_info = execute_nearby_analysis(
-                naics_code=selected_naics_code, region_code=context.region_code,
-                min_concentration=min_conc, max_concentration=max_conc,
-                include_nondetects=include_nondetects)
-            executed_queries = list((debug_info or {}).get("queries", []))
-            if not facilities_df.empty:
+            facilities_df, error, debug = execute_nearby_facilities_query(
+                naics_code=selected_naics_code,
+                region_code=context.region_code,
+            )
+            step_info = build_query_debug_entry(
+                "Step 1: Facilities",
+                debug,
+                row_count=len(facilities_df),
+                error=error,
+            )
+            _record_step(step_info)
+            if error:
+                step.error(f"Step 1 failed: {error}")
+            elif not facilities_df.empty:
                 step.success(f"Step 1: Found {len(facilities_df)} facilities")
             else:
                 step.warning("Step 1: No facilities found")
 
-        with executor.step(2, "Expanding to neighboring areas...") as step:
-            step.success("Step 2: Expanded to neighboring areas")
-
-        with executor.step(3, "Finding PFAS samples...") as step:
-            if not samples_df.empty:
-                step.success(f"Step 3: Found {len(samples_df)} PFAS samples")
+        with executor.step(2, "Finding PFAS samples...") as step:
+            samples_df, error, debug = execute_nearby_samples_query(
+                naics_code=selected_naics_code,
+                region_code=context.region_code,
+                min_concentration=min_conc,
+                max_concentration=max_conc,
+                include_nondetects=include_nondetects,
+            )
+            step_info = build_query_debug_entry(
+                "Step 2: Nearby Samples",
+                debug,
+                row_count=len(samples_df),
+                error=error,
+            )
+            _record_step(step_info)
+            if error:
+                step.error(f"Step 2 failed: {error}")
+            elif not samples_df.empty:
+                step.success(f"Step 2: Found {len(samples_df)} PFAS samples")
             else:
-                step.info("Step 3: No PFAS samples found")
+                step.info("Step 2: No PFAS samples found")
 
+        record_executed_query_batch(
+            request=run_request,
+            executed_queries=executed_queries,
+            step_eta_by_label=step_eta_by_label,
+        )
         boundaries = fetch_boundaries(context.selected_state_code, context.selected_county_code)
 
         state.set("executed_queries", executed_queries)
@@ -103,9 +178,9 @@ def main(context: AnalysisContext) -> None:
             "facilities_df": facilities_df, "samples_df": samples_df,
             "industry_display": selected_industry_display, "boundaries": boundaries,
             "params_data": [
-                {"Parameter": "Industry Type", "Value": selected_industry_display},
-                {"Parameter": "Geographic Region", "Value": context.region_display or "All Regions"},
-                {"Parameter": "Detected Concentration", "Value": f"{min_conc} - {max_conc} ng/L"},
+                build_industry_params(selected_industry_display),
+                build_region_params(context.region_display, default_label="All Regions"),
+                build_concentration_params(min_conc, max_conc, include_nondetects=False),
                 {"Parameter": "Include nondetects", "Value": "Yes" if include_nondetects else "No"},
             ],
             "query_region_code": context.region_code,
@@ -131,19 +206,21 @@ def main(context: AnalysisContext) -> None:
 
         # Step 1: Facilities
         if not facilities_df.empty:
-            st.markdown("### Step 1: Facilities")
             metrics = [{"label": "Total Facilities", "value": len(facilities_df)}]
             if 'industryName' in facilities_df.columns:
                 metrics.append({"label": "Industry Types", "value": facilities_df['industryName'].nunique()})
-            render_metrics_row(metrics, num_columns=2)
-            render_data_expander("View Facilities Data", facilities_df,
-                display_columns=['facilityName', 'industryCode', 'industryName', 'facility'],
+            facilities_table_df = add_naics_url_column(facilities_df)
+            render_step_results("Step 1: Facilities", facilities_table_df, metrics, "View Facilities Data",
+                display_columns=['facilityName', 'industryCode_url', 'industryName', 'facility'],
                 download_filename=f"near_facilities_{query_region_code or 'all'}.csv",
-                download_key=f"download_{context.analysis_key}_facilities")
+                download_key=f"download_{context.analysis_key}_facilities",
+                column_config={"industryCode_url": st.column_config.LinkColumn(
+                    "NAICS Code", display_text=r"code=(\d+)"
+                )},
+            )
 
         # Step 2: Samples
         if not samples_df.empty:
-            st.markdown("### Step 2: PFAS Samples")
             metrics = [{"label": "Total Samples", "value": len(samples_df)}]
             if 'sp' in samples_df.columns:
                 metrics.append({"label": "Unique Sample Points", "value": samples_df['sp'].nunique()})
@@ -151,14 +228,15 @@ def main(context: AnalysisContext) -> None:
                 max_vals = pd.to_numeric(samples_df['max'], errors='coerce')
                 if max_vals.notna().any():
                     metrics.append({"label": "Max Concentration", "value": f"{max_vals.max():.2f} ng/L"})
-            render_metrics_row(metrics, num_columns=3)
 
             samples_display = clean_unit_encoding(samples_df, columns=['unit', 'datedresults', 'results'])
-            render_data_expander("View Samples Data", samples_display,
+            render_step_results("Step 2: PFAS Samples", samples_display, metrics, "View Samples Data",
                 display_columns=['max', 'resultCount', 'datedresults', 'Materials', 'Type', 'spName', 'sp'],
                 download_filename=f"near_facilities_samples_{query_region_code or 'all'}.csv",
                 download_key=f"download_{context.analysis_key}_samples",
-                show_stats=True, stats_column='max')
+                show_stats=True,
+                stats_column='max',
+            )
 
         # Map
         _render_map(facilities_df, samples_df, industry_display, boundaries, query_region_code, context)
@@ -187,18 +265,16 @@ def _render_map(facilities_df, samples_df, industry_display, boundaries, query_r
         map_obj = create_base_map(gdf_list=[facilities_gdf], zoom=8)
         add_boundary_layers(map_obj, boundaries, query_region_code)
 
-        # Add facility links and shorten NAICS codes
+        # Add facility links and NAICS code links
         if "facility" in facilities_gdf.columns:
-            facilities_gdf["facility_link"] = facilities_gdf["facility"].apply(
-                lambda x: f'<a href="https://frs-public.epa.gov/ords/frs_public2/fii_query_detail.disp_program_facility?p_registry_id={x.split(".")[-1]}" target="_blank">FRS {x.split(".")[-1]}</a>' if x else x)
+            facilities_gdf = add_facility_link_column(facilities_gdf)
         if "industryCode" in facilities_gdf.columns:
-            facilities_gdf["industryCode_short"] = facilities_gdf["industryCode"].apply(
-                lambda x: str(x).split("#")[-1] if x else x)
+            facilities_gdf = add_naics_link_column(facilities_gdf)
 
-        facility_fields = [c for c in ["facility_link", "facilityName", "industryName", "industryCode_short"] if c in facilities_gdf.columns]
+        facility_fields = [c for c in ["facility_link", "facilityName", "industryName", "industryCode_link"] if c in facilities_gdf.columns]
         add_point_layer(map_obj, facilities_gdf,
             name=f'<span style="color:Blue;">{industry_display} ({len(facilities_gdf)})</span>',
-            color='Blue', popup_fields=facility_fields, radius=8,
+            color='Blue', popup_fields=facility_fields, radius=FACILITY_MARKER_RADIUS,
             popup_kwds={"max_width": 650, "parse_html": True},
             tooltip_kwds={"sticky": True, "parse_html": True})
 

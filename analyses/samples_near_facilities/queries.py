@@ -1,10 +1,6 @@
 """
-Nearby Samples Queries - Consolidated Version
-Finds contaminated samples near specific facility types (by NAICS code)
-using a single federated SPARQL query.
-
-Similar to upstream tracing, this uses the federation endpoint to combine
-data from multiple knowledge graphs in one query.
+Nearby Samples Queries
+Find PFAS samples near specific facility types (by NAICS code).
 """
 from __future__ import annotations
 
@@ -13,11 +9,12 @@ from typing import Any, Dict, Optional, Tuple
 
 from core.sparql import (
     ENDPOINT_URLS,
+    concentration_filter_sparql,
     parse_sparql_results,
     post_sparql_with_debug,
-    concentration_filter_sparql,
 )
-from core.naics_utils import normalize_naics_codes, build_naics_values_and_hierarchy
+from core.naics_utils import build_naics_values_and_hierarchy, normalize_naics_codes
+
 
 # Alias for backward compatibility
 ENDPOINTS = ENDPOINT_URLS
@@ -48,72 +45,44 @@ def _normalize_samples_df(samples_df: pd.DataFrame) -> pd.DataFrame:
     return samples_df
 
 
-def execute_nearby_analysis(
-    naics_code: str | list[str],
-    region_code: Optional[str],
-    min_concentration: float = 0.0,
-    max_concentration: float = 500.0,
-    include_nondetects: bool = False
-) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, Any]]:
-    """
-    Execute the complete "Samples Near Facilities" analysis using separate queries
-    matching the notebook approach (SAWGraph_Y3_Demo_NearbyFacilities.ipynb).
-
-    Query 1: Get all facilities of the specified industry type
-    Query 2: Get samples near those facilities using S2 cell neighbor subquery
-
-    Args:
-        naics_code: NAICS industry code(s) to search for
-        region_code: FIPS region code (state or county) - optional
-        min_concentration: Minimum contamination threshold (ng/L)
-        max_concentration: Maximum contamination threshold (ng/L)
-        include_nondetects: If True, include samples with zero concentration
-
-    Returns:
-        Tuple of (facilities_df, samples_df)
-    """
+def _build_industry_filter(naics_code: str | list[str]) -> tuple[str, str]:
     naics_codes = normalize_naics_codes(naics_code)
-    industry_label = ", ".join(naics_codes) if naics_codes else "ALL industries"
-    region_label = str(region_code).strip() if region_code else "ALL regions"
+    if not naics_codes:
+        return "", ""
+    return build_naics_values_and_hierarchy(naics_codes[0])
 
-    print(f"\n{'='*60}")
-    print(f"NEARBY ANALYSIS: {industry_label} in region {region_label}")
-    print(f"Concentration range: {min_concentration}-{max_concentration} ng/L")
-    print(f"Include nondetects: {include_nondetects}")
-    print(f"{'='*60}\n")
 
-    # Build industry filter using VALUES clause (notebook style)
-    if naics_codes:
-        industry_values, industry_hierarchy = build_naics_values_and_hierarchy(
-            naics_codes[0]
-        )
-    else:
-        industry_values, industry_hierarchy = "", ""
-
-    # Build region filter (optional).
-    # IMPORTANT: filter on the facility-connected county (not S2 cells), so state + county behave correctly.
-    # - state (2 digits): keep counties within the selected state
-    # - county (5 digits): restrict to that county
+def _build_region_filter(region_code: Optional[str]) -> str:
+    """
+    Build facility county region filter.
+    - state (2 digits): keep counties in selected state
+    - county (5 digits): restrict to that county
+    """
     sanitized_region = str(region_code).strip() if region_code else ""
-    region_filter = ""
-    if sanitized_region:
-        if len(sanitized_region) == 2:
-            region_filter = f"""
+    if not sanitized_region:
+        return ""
+
+    if len(sanitized_region) == 2:
+        return f"""
     ?county rdf:type kwg-ont:AdministrativeRegion_2 ;
             kwg-ont:administrativePartOf kwgr:administrativeRegion.USA.{sanitized_region} .
 """
-        elif len(sanitized_region) == 5:
-            region_filter = f"""
+    if len(sanitized_region) == 5:
+        return f"""
     VALUES ?county {{ kwgr:administrativeRegion.USA.{sanitized_region} }} .
 """
-        else:
-            # Subdivision / other codes not currently supported for this analysis
-            region_filter = ""
+    return ""
 
-    # =========================================================================
-    # QUERY 1: Get facilities (matches notebook q2)
-    # =========================================================================
-    facilities_query = f"""
+
+def execute_nearby_facilities_query(
+    naics_code: str | list[str],
+    region_code: Optional[str],
+) -> Tuple[pd.DataFrame, Optional[str], Dict[str, Any]]:
+    """Step 1: Find facilities in selected industry/region."""
+    industry_values, industry_hierarchy = _build_industry_filter(naics_code)
+    region_filter = _build_region_filter(region_code)
+
+    query = f"""
 PREFIX geo: <http://www.opengis.net/ont/geosparql#>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 PREFIX naics: <http://w3id.org/fio/v1/naics#>
@@ -138,41 +107,37 @@ SELECT DISTINCT ?facility ?facWKT ?facilityName ?industryCode ?industryName WHER
     {industry_values}
 }}
 """
-
-    print("--- Query 1: Fetching facilities ---")
-    facilities_result, facilities_error, facilities_debug = post_sparql_with_debug(
-        "federation", facilities_query
+    results_json, error, debug_info = post_sparql_with_debug("federation", query)
+    facilities_df = parse_sparql_results(results_json) if results_json else pd.DataFrame()
+    debug_info.update(
+        {
+            "label": "Step 1: Facilities",
+            "error": error,
+            "row_count": len(facilities_df),
+        }
     )
-    facilities_df = parse_sparql_results(facilities_result) if facilities_result else pd.DataFrame()
-    facilities_debug.update({
-        "label": "Step 1: Facilities",
-        "error": facilities_error,
-        "row_count": len(facilities_df),
-    })
+    return facilities_df, error, debug_info
 
-    if not facilities_df.empty:
-        print(f"   > Found {len(facilities_df)} facilities")
-    else:
-        print("   > No facilities found")
 
-    # =========================================================================
-    # QUERY 2: Get samples near facilities (matches notebook q5)
-    # Uses subquery for S2 neighbors exactly as in notebook
-    # =========================================================================
+def execute_nearby_samples_query(
+    naics_code: str | list[str],
+    region_code: Optional[str],
+    min_concentration: float = 0.0,
+    max_concentration: float = 500.0,
+    include_nondetects: bool = False,
+) -> Tuple[pd.DataFrame, Optional[str], Dict[str, Any]]:
+    """Step 2: Find PFAS samples near industry facilities."""
+    industry_values, industry_hierarchy = _build_industry_filter(naics_code)
+    region_filter = _build_region_filter(region_code)
 
-    # Build concentration filter.
-    # NOTE: Nondetect handling is expensive in the federated query; when include_nondetects=False
-    # we omit the non-detect machinery entirely for performance.
     if include_nondetects:
         concentration_filter = concentration_filter_sparql(min_concentration, max_concentration, True)
         nondetect_fragment = """
     OPTIONAL { ?result qudt:enumeratedValue ?enumDetected }
-    # Non-detect detection: enumeratedValue OR explicit "non-detect" value (string/URI)
     BIND(
       (BOUND(?enumDetected) || LCASE(STR(?result_value)) = "non-detect" || STR(?result_value) = STR(coso:non-detect))
       as ?isNonDetect
     )
-    # Numeric value for detected results; for non-detects force numericValue=0.
     BIND(
       IF(
         ?isNonDetect,
@@ -190,11 +155,10 @@ SELECT DISTINCT ?facility ?facWKT ?facilityName ?industryCode ?industryName WHER
             ]
         )
         nondetect_fragment = """
-    # Detected-only fast path: numericValue derived from numericResult/result_value, no non-detect handling
     BIND(COALESCE(xsd:decimal(?numericResult), xsd:decimal(?result_value)) as ?numericValue)
 """
 
-    samples_query = f"""
+    query = f"""
 PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
@@ -260,29 +224,44 @@ WHERE {{
 ORDER BY DESC(?max)
 """
 
-    print("--- Query 2: Fetching samples near facilities ---")
-    samples_result, samples_error, samples_debug = post_sparql_with_debug(
-        "federation", samples_query
-    )
-    samples_df = parse_sparql_results(samples_result) if samples_result else pd.DataFrame()
-
+    results_json, error, debug_info = post_sparql_with_debug("federation", query)
+    samples_df = parse_sparql_results(results_json) if results_json else pd.DataFrame()
     if not samples_df.empty:
-        print(f"   > Found {len(samples_df)} sample points")
         samples_df = _normalize_samples_df(samples_df)
-    else:
-        print("   > No samples found near facilities")
-    samples_debug.update({
-        "label": "Step 2: Nearby Samples",
-        "error": samples_error,
-        "row_count": len(samples_df),
-    })
+    debug_info.update(
+        {
+            "label": "Step 2: Nearby Samples",
+            "error": error,
+            "row_count": len(samples_df),
+        }
+    )
+    return samples_df, error, debug_info
 
-    debug_info: Dict[str, Any] = {"queries": [facilities_debug, samples_debug]}
 
-    print(f"\n{'='*60}")
-    print(f"ANALYSIS COMPLETE")
-    print(f"  - Facilities: {len(facilities_df)}")
-    print(f"  - Sample points nearby: {len(samples_df)}")
-    print(f"{'='*60}\n")
+def execute_nearby_analysis(
+    naics_code: str | list[str],
+    region_code: Optional[str],
+    min_concentration: float = 0.0,
+    max_concentration: float = 500.0,
+    include_nondetects: bool = False,
+) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, Any]]:
+    """
+    Compatibility wrapper that runs both nearby queries and returns old shape.
+    """
+    facilities_df, facilities_error, facilities_debug = execute_nearby_facilities_query(
+        naics_code=naics_code,
+        region_code=region_code,
+    )
+    samples_df, samples_error, samples_debug = execute_nearby_samples_query(
+        naics_code=naics_code,
+        region_code=region_code,
+        min_concentration=min_concentration,
+        max_concentration=max_concentration,
+        include_nondetects=include_nondetects,
+    )
 
+    debug_info: Dict[str, Any] = {
+        "queries": [facilities_debug, samples_debug],
+        "errors": [e for e in [facilities_error, samples_error] if e],
+    }
     return facilities_df, samples_df, debug_info

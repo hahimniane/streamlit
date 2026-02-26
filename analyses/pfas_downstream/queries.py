@@ -15,7 +15,6 @@ from core.sparql import (
     parse_sparql_results,
     post_sparql_with_debug,
     build_county_region_filter,
-    build_ar3_region_filter,
     build_facility_values,
     concentration_filter_sparql,
 )
@@ -39,6 +38,26 @@ def _build_industry_filter(naics_code: Optional[str]) -> tuple[str, str]:
     if not codes:
         return "", ""
     return build_naics_values_and_hierarchy(codes[0])
+
+
+def _build_downstream_facility_region_filter(region_code: Optional[str], county_var: str = "?facCounty") -> str:
+    """
+    Region filter scoped to facility-connected county variable for downstream Step 3.
+
+    Matches the requested pattern:
+      ?facCounty rdf:type kwg-ont:AdministrativeRegion_3 ;
+                 kwg-ont:administrativePartOf+ kwgr:administrativeRegion.USA.<code> .
+    """
+    code = str(region_code or "").strip()
+    if not code:
+        return ""
+    if len(code) > 5:
+        # Downstream Step 3 facility filter expects state/county style codes.
+        return ""
+    return (
+        f"{county_var} rdf:type kwg-ont:AdministrativeRegion_3 ;\n"
+        f"               kwg-ont:administrativePartOf+ kwgr:administrativeRegion.USA.{code} ."
+    )
 
 
 def execute_downstream_facilities_query(
@@ -164,8 +183,7 @@ def execute_downstream_samples_query(
 
     facility_values_clause = build_facility_values(facility_uris)
     industry_values, industry_hierarchy = _build_industry_filter(naics_code)
-    sample_region_filter = build_ar3_region_filter(region_code, ar3_var="?ar3")
-    facility_region_filter = build_county_region_filter(region_code, county_var="?facCounty")
+    facility_region_filter = _build_downstream_facility_region_filter(region_code, county_var="?facCounty")
 
     if facility_values_clause:
         industry_values = ""
@@ -223,11 +241,9 @@ WHERE {{
               rdf:type kwg-ont:S2Cell_Level13 .
     }}}}
 
-    ?samplePoint kwg-ont:sfWithin ?s2cell;
-        rdf:type coso:SamplePoint;
-        geo:hasGeometry/geo:asWKT ?spWKT;
-        spatial:connectedTo ?ar3.
-    {sample_region_filter}
+    ?samplePoint spatial:connectedTo ?s2cell ;
+        rdf:type coso:SamplePoint ;
+        geo:hasGeometry/geo:asWKT ?spWKT .
     ?s2cell rdf:type kwg-ont:S2Cell_Level13.
     ?sample coso:fromSamplePoint ?samplePoint;
         dcterms:identifier ?sampleId;

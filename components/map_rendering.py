@@ -4,6 +4,7 @@ Consolidates repeated map creation, styling, and layer management across analyse
 """
 from __future__ import annotations
 
+import re
 from typing import Optional, List, Dict, Any, Callable
 import folium
 import geopandas as gpd
@@ -43,6 +44,156 @@ LAYER_COLORS = [
     'darkred', 'lightgreen', 'green', 'darkblue', 'darkpurple',
     'cadetblue', 'lightgray', 'darkgreen'
 ]
+
+# Shared marker sizing defaults.
+# Update these values to tune marker sizes app-wide.
+DEFAULT_POINT_RADIUS = 6
+FACILITY_MARKER_RADIUS = 8
+OTHER_FACILITY_MARKER_RADIUS = 6
+PFAS_FACILITY_MARKER_RADIUS = 7
+
+
+def extract_frs_registry_id(facility_uri: Any) -> str:
+    """Extract the FRS registry id suffix from a facility URI/value."""
+    value = str(facility_uri or "").strip()
+    if not value:
+        return ""
+    if "." in value:
+        return value.split(".")[-1]
+    if "#" in value:
+        return value.split("#")[-1]
+    if "/" in value:
+        return value.rsplit("/", 1)[-1]
+    return value
+
+
+def add_facility_link_column(
+    df: pd.DataFrame,
+    source_col: str = "facility",
+    target_col: str = "facility_link",
+) -> pd.DataFrame:
+    """
+    Add a clickable EPA FRS detail link column derived from facility URI/id.
+    """
+    if df is None or df.empty or source_col not in df.columns:
+        return df
+
+    def _link_for(value: Any) -> Any:
+        registry_id = extract_frs_registry_id(value)
+        if not registry_id:
+            return value
+        return (
+            '<a href="https://frs-public.epa.gov/ords/frs_public2/fii_query_detail.disp_program_facility'
+            f'?p_registry_id={registry_id}" target="_blank">FRS {registry_id}</a>'
+        )
+
+    result = df.copy()
+    result[target_col] = result[source_col].apply(_link_for)
+    return result
+
+
+def add_short_code_column(
+    df: pd.DataFrame,
+    source_col: str,
+    target_col: str,
+    delimiter: str = "#",
+) -> pd.DataFrame:
+    """Add a short-code helper column by splitting URI-like values."""
+    if df is None or df.empty or source_col not in df.columns:
+        return df
+
+    result = df.copy()
+    result[target_col] = result[source_col].apply(
+        lambda x: str(x).split(delimiter)[-1] if x else x
+    )
+    return result
+
+
+def extract_naics_code(uri: Any) -> str:
+    """Extract the numeric NAICS code from a URI like http://w3id.org/fio/v1/naics#NAICS-321113."""
+    value = str(uri or "").strip()
+    match = re.search(r"(\d+)$", value)
+    return match.group(1) if match else ""
+
+
+def add_naics_link_column(
+    df: pd.DataFrame,
+    source_col: str = "industryCode",
+    target_col: str = "industryCode_link",
+) -> pd.DataFrame:
+    """
+    Add an HTML hyperlink column for NAICS codes (for use in map popups).
+    Displays the numeric code as a clickable link to the NAICS website.
+    """
+    if df is None or df.empty or source_col not in df.columns:
+        return df
+
+    def _link(value: Any) -> Any:
+        code = extract_naics_code(value)
+        if not code:
+            return value
+        return (
+            f'<a href="https://www.naics.com/six-digit-naics/?v=2017&code={code}"'
+            f' target="_blank">{code}</a>'
+        )
+
+    result = df.copy()
+    result[target_col] = result[source_col].apply(_link)
+    return result
+
+
+def add_naics_url_column(
+    df: pd.DataFrame,
+    source_col: str = "industryCode",
+    target_col: str = "industryCode_url",
+) -> pd.DataFrame:
+    """
+    Add a plain URL column for NAICS codes (for use with st.column_config.LinkColumn in tables).
+    """
+    if df is None or df.empty or source_col not in df.columns:
+        return df
+
+    def _url(value: Any) -> Any:
+        code = extract_naics_code(value)
+        if not code:
+            return None
+        return f"https://www.naics.com/six-digit-naics/?v=2017&code={code}"
+
+    result = df.copy()
+    result[target_col] = result[source_col].apply(_url)
+    return result
+
+
+def downstream_sample_style(feature: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Marker style used by downstream analysis samples layer.
+
+    Keeps current behavior:
+    - non-detects render black and small
+    - larger concentrations render larger gray markers
+    """
+    props = (feature or {}).get("properties", {}) or {}
+    max_val = props.get("Max")
+    is_nondetect = max_val in ["non-detect", "http://w3id.org/coso/v1/contaminoso#non-detect"]
+    if not is_nondetect:
+        try:
+            is_nondetect = float(max_val) == 0
+        except Exception:
+            pass
+
+    radius = 4
+    if not is_nondetect:
+        try:
+            v = float(max_val)
+            radius = 4 if v < 40 else (v / 16 if v < 160 else 12)
+        except Exception:
+            pass
+
+    return {
+        "radius": max(3, min(12, radius)),
+        "opacity": 0.3,
+        "color": "Black" if is_nondetect else "DimGray",
+    }
 
 
 def create_base_map(
@@ -113,7 +264,7 @@ def add_point_layer(
     color: str,
     popup_fields: List[str] = None,
     tooltip_fields: List[str] = None,
-    radius: int = 6,
+    radius: int = DEFAULT_POINT_RADIUS,
     show: bool = True,
     style_function: Callable = None,
     marker_type: str = 'circle_marker',
@@ -211,7 +362,7 @@ def add_grouped_point_layers(
     group_column: str,
     popup_fields: List[str] = None,
     colors: List[str] = None,
-    radius: int = 6,
+    radius: int = FACILITY_MARKER_RADIUS,
     name_template: str = "{group} ({count})",
     popup_kwds: Dict = None
 ) -> None:

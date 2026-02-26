@@ -10,16 +10,23 @@ from streamlit_folium import st_folium
 
 from analysis_registry import AnalysisContext
 from analyses.pfas_upstream.queries import run_upstream
-from filters.substance import get_available_substances_with_labels
-from filters.material import get_available_material_types_with_labels
+from filters.industry import render_sidebar_industry_selector
+from filters.substance import get_cached_substances_with_labels
+from filters.material import get_cached_material_types_with_labels
 from filters.concentration import render_concentration_filter, apply_concentration_filter
 
 # Shared components
 from core.boundary import fetch_boundaries
 from core.geometry import create_geodataframe
-from components.parameter_display import render_parameter_table
-from components.result_display import render_metrics_row, render_data_expander
+from components.parameter_display import (
+    build_concentration_params,
+    render_parameter_table,
+)
+from components.result_display import render_step_results
 from components.map_rendering import (
+    FACILITY_MARKER_RADIUS,
+    add_naics_link_column,
+    add_naics_url_column,
     create_base_map, add_boundary_layers, add_point_layer,
     add_line_layer, add_grouped_point_layers, finalize_map, render_map_legend
 )
@@ -27,6 +34,15 @@ from components.execute_button import render_execute_button
 from components.analysis_state import AnalysisState, check_old_session_keys
 from components.step_execution import StepExecutor
 from components.query_debug import render_executed_queries
+from components.eta_display import (
+    render_simple_eta,
+)
+from core.runtime_eta import (
+    build_eta_request,
+    estimate_eta,
+    naics_prefix2_from_code,
+    record_executed_query_batch,
+)
 
 
 def main(context: AnalysisContext) -> None:
@@ -55,11 +71,11 @@ def main(context: AnalysisContext) -> None:
     # Substance selector
     is_subdivision = len(context.region_code) > 5 if context.region_code else False
 
-    @st.cache_data(ttl=3600)
-    def get_substances(region_code: str, is_sub: bool):
-        return get_available_substances_with_labels(region_code, is_sub)
-
-    substances_view = get_substances(context.region_code, is_subdivision) if context.region_code else pd.DataFrame()
+    substances_view = (
+        get_cached_substances_with_labels(context.region_code, is_subdivision)
+        if context.region_code
+        else pd.DataFrame()
+    )
 
     st.sidebar.markdown("### PFAS Substance")
     substance_map = {}
@@ -85,12 +101,12 @@ def main(context: AnalysisContext) -> None:
     st.sidebar.markdown("---")
 
     # Material type selector
-    @st.cache_data(ttl=3600)
-    def get_materials(region_code: str, is_sub: bool):
-        return get_available_material_types_with_labels(region_code, is_sub)
-
     st.sidebar.markdown("### Sample Material Type")
-    material_types_view = get_materials(context.region_code, is_subdivision) if context.region_code else pd.DataFrame()
+    material_types_view = (
+        get_cached_material_types_with_labels(context.region_code, is_subdivision)
+        if context.region_code
+        else pd.DataFrame()
+    )
 
     material_type_map = {}
     if not material_types_view.empty:
@@ -111,6 +127,17 @@ def main(context: AnalysisContext) -> None:
 
     st.sidebar.markdown("---")
 
+    # Optional industry selector (applies to Step 3 facilities only)
+    selected_naics_code, selected_industry_display = render_sidebar_industry_selector(
+        analysis_key=context.analysis_key,
+        heading="### Industry Type",
+        caption="_Optional: filter Step 3 upstream facilities by industry_",
+        allow_empty=True,
+        empty_label="All Industries",
+    )
+
+    st.sidebar.markdown("---")
+
     # Concentration filter
     conc_filter = render_concentration_filter(context.analysis_key, default_max=500)
 
@@ -121,6 +148,19 @@ def main(context: AnalysisContext) -> None:
         missing_fields=["county"] if not county_selected else None,
         help_text="Execute the upstream tracing analysis" if county_selected else None
     )
+
+    preview_request = build_eta_request(
+        analysis_key=context.analysis_key,
+        region_code=context.region_code,
+        state_code=context.selected_state_code,
+        min_conc=conc_filter.min_concentration,
+        max_conc=conc_filter.max_concentration,
+        include_nondetects=conc_filter.include_nondetects,
+        naics_prefix2=naics_prefix2_from_code(selected_naics_code),
+        has_substance_filter=selected_substance_uri is not None,
+        has_material_filter=selected_material_uri is not None,
+    )
+    render_simple_eta(estimate_eta(preview_request))
 
     # === QUERY EXECUTION ===
     if execute_clicked:
@@ -133,12 +173,26 @@ def main(context: AnalysisContext) -> None:
             params_data = [
                 {"Parameter": "PFAS Substance", "Value": selected_substance_name or "All Substances"},
                 {"Parameter": "Material Type", "Value": selected_material_name or "All Material Types"},
-                {"Parameter": "Detected Concentration", "Value": f"{min_conc} - {max_conc} ng/L" + (" (including nondetects)" if include_nondetects else "")},
+                {"Parameter": "Industry Type (Step 3 Facilities)", "Value": selected_industry_display},
+                build_concentration_params(min_conc, max_conc, include_nondetects),
                 {"Parameter": "Geographic Region", "Value": context.region_display},
             ]
 
             st.markdown("---")
             st.subheader("Query Execution")
+
+            run_request = build_eta_request(
+                analysis_key=context.analysis_key,
+                region_code=context.region_code,
+                state_code=context.selected_state_code,
+                min_conc=min_conc,
+                max_conc=max_conc,
+                include_nondetects=include_nondetects,
+                naics_prefix2=naics_prefix2_from_code(selected_naics_code),
+                has_substance_filter=selected_substance_uri is not None,
+                has_material_filter=selected_material_uri is not None,
+            )
+            run_eta = estimate_eta(run_request)
 
             boundaries = fetch_boundaries(context.selected_state_code, context.selected_county_code)
             executor = StepExecutor(num_steps=3)
@@ -163,6 +217,7 @@ def main(context: AnalysisContext) -> None:
                     max_conc,
                     context.region_code,
                     include_nondetects=include_nondetects,
+                    naics_code=selected_naics_code,
                 )
 
             with executor.step(1, "Step 1") as step:
@@ -183,6 +238,13 @@ def main(context: AnalysisContext) -> None:
                     step.info("No facilities found")
             if err:
                 st.error(err)
+
+            step_eta_by_label = {s.label: s for s in run_eta.step_estimates}
+            record_executed_query_batch(
+                request=run_request,
+                executed_queries=executed_queries,
+                step_eta_by_label=step_eta_by_label,
+            )
 
             state.set('executed_queries', executed_queries)
             # Store results
@@ -211,7 +273,6 @@ def main(context: AnalysisContext) -> None:
         params_data = results.get('params_data', [])
         query_region_code = results.get('query_region_code')
         saved_material_name = results.get('selected_material_name')
-
         st.markdown("---")
         render_parameter_table(params_data)
         st.markdown("---")
@@ -220,16 +281,15 @@ def main(context: AnalysisContext) -> None:
 
         # Step 1 Results
         if not samples_df.empty:
-            st.markdown("### Step 1: PFAS Samples")
             metrics = [{"label": "Total Samples", "value": len(samples_df)}]
             if 'sp' in samples_df.columns:
                 metrics.append({"label": "Unique Sample Points", "value": samples_df['sp'].nunique()})
             if 'matType' in samples_df.columns:
                 metrics.append({"label": "Material Type", "value": saved_material_name or "All"})
-            render_metrics_row(metrics, num_columns=len(metrics))
-            render_data_expander("View PFAS Samples Data", samples_df,
+            render_step_results("Step 1: PFAS Samples", samples_df, metrics, "View PFAS Samples Data",
                 download_filename=f"contaminated_samples_{query_region_code}.csv",
-                download_key=f"download_{context.analysis_key}_samples")
+                download_key=f"download_{context.analysis_key}_samples",
+            )
 
         # Step 2 Results (notebook-style returns flowlines only; default returns upstream_s2_df)
         if not upstream_s2_df.empty or not upstream_flowlines_df.empty:
@@ -239,15 +299,18 @@ def main(context: AnalysisContext) -> None:
 
         # Step 3 Results
         if not facilities_df.empty:
-            st.markdown("### Step 3: Potential Source Facilities")
             metrics = [{"label": "Total Facilities", "value": len(facilities_df)}]
             if 'industryName' in facilities_df.columns:
                 metrics.append({"label": "Industry Types", "value": facilities_df['industryName'].nunique()})
-            render_metrics_row(metrics, num_columns=2)
-            render_data_expander("View Facilities Data", facilities_df,
-                display_columns=['facilityName', 'industryCode', 'industryName', 'facility'],
+            facilities_table_df = add_naics_url_column(facilities_df)
+            render_step_results("Step 3: Potential Source Facilities", facilities_table_df, metrics, "View Facilities Data",
+                display_columns=['facilityName', 'industryCode_url', 'industryName', 'facility'],
                 download_filename=f"upstream_facilities_{query_region_code}.csv",
-                download_key=f"download_{context.analysis_key}_facilities")
+                download_key=f"download_{context.analysis_key}_facilities",
+                column_config={"industryCode_url": st.column_config.LinkColumn(
+                    "NAICS Code", display_text=r"code=(\d+)"
+                )},
+            )
 
             # Industry breakdown
             if 'industryName' in facilities_df.columns:
@@ -325,8 +388,11 @@ def _render_map(samples_df, facilities_df, upstream_s2_df, upstream_flowlines_df
             if col in facilities_gdf.columns and facilities_gdf[col].notna().any():
                 group_col = col
                 break
-        fields = [c for c in ["facilityName", "industryName", "industryCode", "facility"] if c in facilities_gdf.columns]
-        add_grouped_point_layers(map_obj, facilities_gdf, group_col, popup_fields=fields, radius=6)
+        if 'industryCode' in facilities_gdf.columns:
+            facilities_gdf = add_naics_link_column(facilities_gdf)
+        fields = [c for c in ["facilityName", "industryName", "industryCode_link", "facility"] if c in facilities_gdf.columns]
+        add_grouped_point_layers(map_obj, facilities_gdf, group_col, popup_fields=fields, radius=FACILITY_MARKER_RADIUS,
+                                 popup_kwds={"parse_html": True})
 
     finalize_map(map_obj)
     st_folium(map_obj, width=None, height=600, returned_objects=[])

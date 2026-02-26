@@ -8,6 +8,7 @@ from functools import lru_cache
 from typing import List, Optional
 import pandas as pd
 import requests
+import streamlit as st
 
 from core.sparql import ENDPOINT_URLS, parse_sparql_results, execute_sparql_query
 
@@ -189,6 +190,15 @@ SELECT DISTINCT ?substance ?label WHERE {{
 
     df["display_name"] = df.apply(_resolve_display_name, axis=1)
     return df[["substance", "display_name"]].reset_index(drop=True)
+
+
+@st.cache_data(ttl=3600)
+def get_cached_substances_with_labels(
+    region_code: str,
+    is_subdivision: bool = False,
+) -> pd.DataFrame:
+    """Cached wrapper for region-scoped substance availability."""
+    return get_available_substances_with_labels(region_code, is_subdivision)
 
 
 def get_available_substances(region_code: str, is_subdivision: bool = False) -> List[str]:

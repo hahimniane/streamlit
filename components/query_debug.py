@@ -23,6 +23,13 @@ def _build_metadata_line(query_info: Mapping[str, Any]) -> str:
     if response_status is not None:
         parts.append(f"Status: `{response_status}`")
 
+    elapsed_ms = query_info.get("elapsed_ms")
+    if elapsed_ms is not None:
+        try:
+            parts.append(f"Elapsed: `{float(elapsed_ms) / 1000.0:.2f}s`")
+        except (TypeError, ValueError):
+            pass
+
     row_count = query_info.get("row_count")
     if row_count is not None:
         parts.append(f"Rows: `{row_count}`")

@@ -6,6 +6,8 @@ This is the single source of truth for SPARQL utilities.
 from __future__ import annotations
 
 from typing import Any, Optional
+from datetime import datetime, timezone
+import time
 import pandas as pd
 import rdflib
 import requests
@@ -373,18 +375,36 @@ def post_sparql_with_debug(
         (json_response, error_message, debug_dict). debug_dict has endpoint, query,
         response_status, and optionally exception.
     """
+    started_perf = time.perf_counter()
+    started_at_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def _elapsed_ms() -> float:
+        return (time.perf_counter() - started_perf) * 1000.0
+
     if endpoint_key not in ENDPOINT_URLS:
-        return None, f"Unknown endpoint: {endpoint_key}", {"endpoint": None, "query": query}
+        return None, f"Unknown endpoint: {endpoint_key}", {
+            "endpoint": None,
+            "query": query,
+            "timeout_sec": timeout,
+            "started_at_utc": started_at_utc,
+            "elapsed_ms": _elapsed_ms(),
+        }
     endpoint = ENDPOINT_URLS[endpoint_key]
     headers = {
         "Accept": "application/sparql-results+json",
         "Content-Type": "application/x-www-form-urlencoded",
     }
-    debug: dict[str, Any] = {"endpoint": endpoint, "query": query}
+    debug: dict[str, Any] = {
+        "endpoint": endpoint,
+        "query": query,
+        "timeout_sec": timeout,
+        "started_at_utc": started_at_utc,
+    }
     try:
         response = requests.post(
             endpoint, data={"query": query}, headers=headers, timeout=timeout
         )
+        debug["elapsed_ms"] = _elapsed_ms()
         debug["response_status"] = response.status_code
         if response.status_code != 200:
             return (
@@ -394,11 +414,36 @@ def post_sparql_with_debug(
             )
         return response.json(), None, debug
     except requests.exceptions.RequestException as e:
+        debug["elapsed_ms"] = _elapsed_ms()
         debug["exception"] = str(e)
         return None, f"Network error: {str(e)}", debug
     except Exception as e:
+        debug["elapsed_ms"] = _elapsed_ms()
         debug["exception"] = str(e)
         return None, f"Error: {str(e)}", debug
+
+
+def build_query_debug_entry(
+    label: str,
+    debug_info: Optional[dict[str, Any]],
+    row_count: Optional[int] = None,
+    error: Optional[str] = None,
+    query: Optional[str] = None,
+) -> dict[str, Any]:
+    """
+    Normalize a per-step query debug record for UI rendering and telemetry.
+    """
+    debug = debug_info or {}
+    return {
+        "label": label,
+        "endpoint": debug.get("endpoint"),
+        "timeout_sec": debug.get("timeout_sec"),
+        "response_status": debug.get("response_status"),
+        "elapsed_ms": debug.get("elapsed_ms"),
+        "row_count": row_count,
+        "error": error or debug.get("exception"),
+        "query": query if query is not None else debug.get("query"),
+    }
 
 
 def execute_sparql_query(

@@ -316,15 +316,15 @@ def _render_map(samplepts_df, aquifers_df, wells_df, boundaries, context) -> Non
             fields = [c for c in ["sp", "max_conc"] if c in samplepts_gdf.columns]
             add_point_layer(
                 map_obj, samplepts_gdf,
-                name='<span style="color:DarkOrange;">PFAS Sample Points</span>',
-                color="DarkOrange", popup_fields=fields, radius=7,
+                name='<span style="color:Red;">Private Well Sample Points</span>',
+                color="Red", popup_fields=fields, radius=7,
             )
 
         finalize_map(map_obj)
         render_folium_map(map_obj)
         render_map_legend([
             "**Blue polygons** = Aquifers connected to contaminated sample points",
-            "**Orange circles** = PFAS contaminated sample points",
+            "**Red circles** = Private well sample points",
             "**Light blue circles** = Potentially connected water wells",
             "**Boundary outline** = Selected region",
         ])

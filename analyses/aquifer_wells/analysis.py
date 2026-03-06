@@ -9,10 +9,7 @@ import streamlit as st
 import pandas as pd
 
 from analysis_registry import AnalysisContext
-from analyses.aquifer_wells.queries import (
-    execute_aquifer_query,
-    execute_sample_history_query,
-)
+from analyses.aquifer_wells.queries import execute_aquifer_query
 from filters.substance import get_cached_substances_with_labels
 from filters.concentration import render_concentration_filter, apply_concentration_filter
 
@@ -259,7 +256,6 @@ def main(context: AnalysisContext) -> None:
             )
 
         _render_map(samplepts_df, aquifers_df, wells_df, boundaries, context)
-        _render_drill_down(samplepts_df, state, context)
 
     else:
         st.info("Select parameters in the sidebar and click 'Execute Query' to run the analysis.")
@@ -337,63 +333,3 @@ def _render_map(samplepts_df, aquifers_df, wells_df, boundaries, context) -> Non
         st.error(f"Error rendering map: {e}")
 
 
-def _render_drill_down(samplepts_df: pd.DataFrame, state: AnalysisState, context: AnalysisContext) -> None:
-    """Render the sample point history drill-down section."""
-    if samplepts_df.empty or "sp" not in samplepts_df.columns:
-        return
-
-    st.markdown("---")
-    st.markdown("### Sample Point History")
-    st.caption("Select a sample point to view its full PFAS measurement history.")
-
-    sp_uris = samplepts_df["sp"].dropna().unique().tolist()
-    short_labels = {_short_uri(u): u for u in sp_uris}
-
-    selected_label = st.selectbox(
-        "Sample point",
-        ["-- Select --"] + list(short_labels.keys()),
-        key=f"{context.analysis_key}_history_sp",
-    )
-
-    if not selected_label or selected_label == "-- Select --":
-        return
-
-    selected_uri = short_labels[selected_label]
-    cached_uri = state.get("history_sp", None)
-
-    if cached_uri != selected_uri:
-        with st.spinner("Loading measurement history..."):
-            history_df, hist_error, _ = execute_sample_history_query(selected_uri)
-        state.set("history_sp", selected_uri)
-        state.set("history_df", history_df)
-        state.set("history_error", hist_error)
-    else:
-        history_df = state.get("history_df", pd.DataFrame())
-        hist_error = state.get("history_error", None)
-
-    if hist_error:
-        st.error(f"Error loading history: {hist_error}")
-        return
-
-    if history_df.empty:
-        st.info("No measurement history found for this sample point.")
-        return
-
-    st.markdown(f"**Measurements for:** `{selected_label}`")
-    st.dataframe(history_df, use_container_width=True, hide_index=True)
-
-    csv = history_df.to_csv(index=False)
-    st.download_button(
-        label="Download CSV",
-        data=csv,
-        file_name=f"history_{_short_uri(selected_uri)}.csv",
-        mime="text/csv",
-        key=f"{context.analysis_key}_history_download",
-    )
-
-
-def _short_uri(uri: str) -> str:
-    """Extract a short readable label from a URI."""
-    if not uri:
-        return uri
-    return str(uri).rstrip("/").rsplit("/", 1)[-1].rsplit("#", 1)[-1]

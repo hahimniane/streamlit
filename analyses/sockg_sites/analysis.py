@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import streamlit as st
 import pandas as pd
-from streamlit_folium import st_folium
 
 from analysis_registry import AnalysisContext
 from analyses.sockg_sites.queries import get_sockg_locations, get_sockg_facilities
@@ -23,6 +22,7 @@ from components.map_rendering import (
     add_point_layer,
     finalize_map,
     render_map_legend,
+    render_folium_map,
 )
 from components.execute_button import render_execute_button
 from components.analysis_state import AnalysisState
@@ -241,7 +241,7 @@ def _render_map(sites_df, facilities_df, region_boundary_df, state_code) -> None
 
     add_region_boundary_layers(map_obj, region_boundary_df=region_boundary_df, region_code=state_code)
     finalize_map(map_obj)
-    st_folium(map_obj, width=None, height=600, returned_objects=[])
+    render_folium_map(map_obj)
     render_map_legend([
         "**Red circles** = SOCKG locations (ARS sites)",
         "**Dark blue circles** = Other facilities",

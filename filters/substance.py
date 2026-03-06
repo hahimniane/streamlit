@@ -148,7 +148,7 @@ SELECT DISTINCT ?substance ?label WHERE {{
     ?sp rdf:type coso:SamplePoint ;
         kwg-ont:sfWithin|kwg-ont:sfTouches ?ar3 .
     ?ar3 rdf:type kwg-ont:AdministrativeRegion_3 ;
-         kwg-ont:administrativePartOf <http://stko-kwg.geog.ucsb.edu/lod/resource/administrativeRegion.USA.{region_code}> .
+         kwg-ont:administrativePartOf+ <http://stko-kwg.geog.ucsb.edu/lod/resource/administrativeRegion.USA.{region_code}> .
     ?observation rdf:type coso:ContaminantObservation ;
                 coso:observedAtSamplePoint ?sp ;
                 coso:ofSubstance ?substance .

@@ -19,6 +19,7 @@ from filters.region import (
     render_region_selector,
 )
 from analyses.sockg_sites.queries import get_sockg_state_code_set
+from analyses.aquifer_wells.queries import get_aquifer_state_code_set
 from components.start_page import render_start_page
 
 
@@ -76,16 +77,21 @@ def main() -> None:
     else:
         region_config = RegionConfig()
     
-    # Determine the SOCKG state codes function if needed
-    sockg_fn = get_sockg_state_code_set if region_config.availability_source == "sockg" else None
-    
+    # Determine the availability function based on source
+    if region_config.availability_source == "sockg":
+        availability_fn = get_sockg_state_code_set
+    elif region_config.availability_source == "aquifer":
+        availability_fn = get_aquifer_state_code_set
+    else:
+        availability_fn = None
+
     # Render the unified region selector using the analysis's config
     region = render_region_selector(
         config=region_config,
         states_df=states_df,
         counties_df=counties_df,
         subdivisions_df=subdivisions_df,
-        get_sockg_state_codes_fn=sockg_fn,
+        get_sockg_state_codes_fn=availability_fn,
     )
 
     if analysis_label == "-- Home --" or not selected_key:

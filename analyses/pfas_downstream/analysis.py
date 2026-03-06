@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import streamlit as st
 import pandas as pd
-from streamlit_folium import st_folium
 
 from analysis_registry import AnalysisContext
 from analyses.pfas_downstream.queries import (
@@ -34,7 +33,7 @@ from components.map_rendering import (
     add_naics_link_column,
     add_naics_url_column,
     create_base_map, add_boundary_layers, add_line_layer,
-    add_grouped_point_layers, finalize_map, render_map_legend
+    add_grouped_point_layers, finalize_map, render_map_legend, render_folium_map
 )
 from components.execute_button import render_execute_button, check_required_fields
 from components.analysis_state import AnalysisState, check_old_session_keys
@@ -240,9 +239,14 @@ def main(context: AnalysisContext) -> None:
                 display_columns=['facilityName', 'industryName', 'industryCode_url', 'facility'],
                 download_filename=f"downstream_facilities_{query_region_code or 'all'}.csv",
                 download_key=f"download_{context.analysis_key}_facilities",
-                column_config={"industryCode_url": st.column_config.LinkColumn(
-                    "NAICS Code", display_text=r"code=(\d+)"
-                )})
+                column_config={
+                    "industryCode_url": st.column_config.LinkColumn(
+                        "NAICS Code", display_text=r"code=(\d+)"
+                    ),
+                    "facility": st.column_config.LinkColumn(
+                        "Facility", display_text=r"FRS-Facility\.(\d+)"
+                    ),
+                })
 
         # Step 2: Streams
         if not streams_df.empty:
@@ -342,12 +346,13 @@ def _render_map(facilities_df, streams_df, samples_df, boundaries, context) -> N
 
     # Add facilities
     if facilities_gdf is not None and not facilities_gdf.empty:
-        fields = [c for c in ["facility_link", "facilityName", "industryName", "industryCode_link"] if c in facilities_gdf.columns]
+        fields = [c for c in ["Facility ID", "facilityName", "industryName", "NAICS Code"] if c in facilities_gdf.columns]
         add_grouped_point_layers(map_obj, facilities_gdf, 'industryName', popup_fields=fields, radius=FACILITY_MARKER_RADIUS,
-                                 popup_kwds={"max_width": 900, "parse_html": True})
+                                 popup_kwds={"max_width": 900, "parse_html": True},
+                                 tooltip_kwds={"parse_html": True})
 
     finalize_map(map_obj)
-    st_folium(map_obj, width=None, height=700, returned_objects=[])
+    render_folium_map(map_obj)
     render_map_legend([
         "**Boundary outline** = Selected region",
         "**Orange circles** = PFAS samples downstream",

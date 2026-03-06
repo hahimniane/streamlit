@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import streamlit as st
 import pandas as pd
-from streamlit_folium import st_folium
 
 from analysis_registry import AnalysisContext
 from analyses.samples_near_facilities.queries import (
@@ -37,6 +36,7 @@ from components.map_rendering import (
     add_point_layer,
     finalize_map,
     render_map_legend,
+    render_folium_map,
 )
 from components.execute_button import render_execute_button
 from components.analysis_state import AnalysisState, check_old_session_keys
@@ -214,9 +214,14 @@ def main(context: AnalysisContext) -> None:
                 display_columns=['facilityName', 'industryCode_url', 'industryName', 'facility'],
                 download_filename=f"near_facilities_{query_region_code or 'all'}.csv",
                 download_key=f"download_{context.analysis_key}_facilities",
-                column_config={"industryCode_url": st.column_config.LinkColumn(
-                    "NAICS Code", display_text=r"code=(\d+)"
-                )},
+                column_config={
+                    "industryCode_url": st.column_config.LinkColumn(
+                        "NAICS Code", display_text=r"code=(\d+)"
+                    ),
+                    "facility": st.column_config.LinkColumn(
+                        "Facility", display_text=r"FRS-Facility\.(\d+)"
+                    ),
+                },
             )
 
         # Step 2: Samples
@@ -271,7 +276,7 @@ def _render_map(facilities_df, samples_df, industry_display, boundaries, query_r
         if "industryCode" in facilities_gdf.columns:
             facilities_gdf = add_naics_link_column(facilities_gdf)
 
-        facility_fields = [c for c in ["facility_link", "facilityName", "industryName", "industryCode_link"] if c in facilities_gdf.columns]
+        facility_fields = [c for c in ["Facility ID", "facilityName", "industryName", "NAICS Code"] if c in facilities_gdf.columns]
         add_point_layer(map_obj, facilities_gdf,
             name=f'<span style="color:Blue;">{industry_display} ({len(facilities_gdf)})</span>',
             color='Blue', popup_fields=facility_fields, radius=FACILITY_MARKER_RADIUS,
@@ -291,7 +296,7 @@ def _render_map(facilities_df, samples_df, industry_display, boundaries, query_r
                     popup_kwds={'max_height': 450, 'max_width': 450})
 
         finalize_map(map_obj)
-        st_folium(map_obj, width=None, height=600, returned_objects=[])
+        render_folium_map(map_obj)
         render_map_legend([
             "**Boundary** = Selected region",
             "**Blue markers** = Facilities of selected industry type",

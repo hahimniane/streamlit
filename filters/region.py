@@ -418,7 +418,7 @@ def render_region_selector(
     # Determine availability source
     if config.availability_source == "pfas":
         available_state_codes = get_available_state_codes()
-    elif config.availability_source == "sockg" and get_sockg_state_codes_fn:
+    elif config.availability_source in ("sockg", "aquifer") and get_sockg_state_codes_fn:
         available_state_codes = get_sockg_state_codes_fn()
     else:
         available_state_codes = set()
@@ -461,7 +461,7 @@ def render_region_selector(
             selected = st.session_state.get("state_selector", default_option)
             if selected and selected.startswith("✗ "):
                 rejected_state = selected.replace("✗ ", "")
-                source_name = "SOCKG" if config.availability_source == "sockg" else "PFAS"
+                source_name = {"sockg": "SOCKG", "aquifer": "Aquifer"}.get(config.availability_source, "PFAS")
                 st.session_state.state_rejected_msg = f"❌ {rejected_state} has no {source_name} data. Please select a state with ✓"
                 st.session_state.state_selector = default_option
 

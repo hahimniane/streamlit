@@ -44,6 +44,9 @@ ANALYSIS_STEP_LABELS: dict[str, list[str]] = {
         "Step 1: SOCKG Locations",
         "Step 2: SOCKG Nearby Facilities",
     ],
+    "aquifer_wells": [
+        "Step 1: Samples, Aquifers & Wells",
+    ],
 }
 
 # Seeded priors in milliseconds for (low, mid, high).
@@ -65,6 +68,10 @@ STEP_PRIORS_MS: dict[str, dict[str, tuple[float, float, float]]] = {
     "sockg_sites": {
         "Step 1: SOCKG Locations": (2000.0, 4000.0, 7000.0),
         "Step 2: SOCKG Nearby Facilities": (4000.0, 7000.0, 12000.0),
+    },
+    "aquifer_wells": {
+        "Step 1: Contaminated Samples & Aquifers": (5000.0, 12000.0, 25000.0),
+        "Step 2: Connected Wells": (2000.0, 5000.0, 10000.0),
     },
 }
 

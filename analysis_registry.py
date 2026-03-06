@@ -14,7 +14,7 @@ class RegionConfig:
     state: Literal["required", "optional", "hidden"] = "optional"
     county: Literal["required", "optional", "hidden"] = "optional"
     subdivision: Literal["required", "optional", "hidden"] = "optional"
-    availability_source: Literal["pfas", "sockg", None] = "pfas"
+    availability_source: Literal["pfas", "sockg", "aquifer", None] = "pfas"
 
 
 @dataclass
@@ -80,6 +80,7 @@ def build_registry() -> dict[str, AnalysisSpec]:
     from analyses.regional_overview.analysis import main as regional_main
     from analyses.facility_risk.analysis import main as risk_main
     from analyses.sockg_sites.analysis import main as sockg_main
+    from analyses.aquifer_wells.analysis import main as aquifer_wells_main
     
     specs = [
         AnalysisSpec(
@@ -140,6 +141,21 @@ def build_registry() -> dict[str, AnalysisSpec]:
                 county="hidden",
                 subdivision="hidden",
                 availability_source="sockg",
+            ),
+        ),
+        AnalysisSpec(
+            key="aquifer_wells",
+            label="Aquifer-Connected Wells",
+            title="💧 Aquifer-Connected Wells",
+            description="Find PFAS-contaminated sample points, connected aquifers, and potentially at-risk water wells.",
+            query=7,
+            enabled=True,
+            runner=aquifer_wells_main,
+            region_config=RegionConfig(
+                state="optional",
+                county="optional",
+                subdivision="optional",
+                availability_source="aquifer",
             ),
         ),
         AnalysisSpec(

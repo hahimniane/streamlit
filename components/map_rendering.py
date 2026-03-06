@@ -70,22 +70,20 @@ def extract_frs_registry_id(facility_uri: Any) -> str:
 def add_facility_link_column(
     df: pd.DataFrame,
     source_col: str = "facility",
-    target_col: str = "facility_link",
+    target_col: str = "Facility ID",
 ) -> pd.DataFrame:
     """
-    Add a clickable EPA FRS detail link column derived from facility URI/id.
+    Add a clickable link column using the facility URI directly.
     """
     if df is None or df.empty or source_col not in df.columns:
         return df
 
     def _link_for(value: Any) -> Any:
-        registry_id = extract_frs_registry_id(value)
-        if not registry_id:
+        uri = str(value).strip() if value else ""
+        if not uri or uri == "nan":
             return value
-        return (
-            '<a href="https://frs-public.epa.gov/ords/frs_public2/fii_query_detail.disp_program_facility'
-            f'?p_registry_id={registry_id}" target="_blank">FRS {registry_id}</a>'
-        )
+        label = uri.rsplit("/", 1)[-1].rsplit("#", 1)[-1]
+        return f'<a href="{uri}" target="_blank">{label}</a>'
 
     result = df.copy()
     result[target_col] = result[source_col].apply(_link_for)
@@ -119,7 +117,7 @@ def extract_naics_code(uri: Any) -> str:
 def add_naics_link_column(
     df: pd.DataFrame,
     source_col: str = "industryCode",
-    target_col: str = "industryCode_link",
+    target_col: str = "NAICS Code",
 ) -> pd.DataFrame:
     """
     Add an HTML hyperlink column for NAICS codes (for use in map popups).
@@ -133,7 +131,7 @@ def add_naics_link_column(
         if not code:
             return value
         return (
-            f'<a href="https://www.naics.com/six-digit-naics/?v=2017&code={code}"'
+            f'<a href="https://www.naics.com/naics-code-description/?code={code}"'
             f' target="_blank">{code}</a>'
         )
 
@@ -157,7 +155,7 @@ def add_naics_url_column(
         code = extract_naics_code(value)
         if not code:
             return None
-        return f"https://www.naics.com/six-digit-naics/?v=2017&code={code}"
+        return f"https://www.naics.com/naics-code-description/?code={code}"
 
     result = df.copy()
     result[target_col] = result[source_col].apply(_url)
@@ -365,6 +363,7 @@ def add_grouped_point_layers(
     radius: int = FACILITY_MARKER_RADIUS,
     name_template: str = "{group} ({count})",
     popup_kwds: Dict = None,
+    tooltip_kwds: Dict = None,
 ) -> None:
     """
     Add multiple point layers, one for each unique value in a grouping column.
@@ -380,6 +379,7 @@ def add_grouped_point_layers(
         radius: Marker radius
         name_template: Template for layer names (uses {group} and {count})
         popup_kwds: Additional popup keyword arguments
+        tooltip_kwds: Additional tooltip keyword arguments
     """
     if gdf is None or gdf.empty:
         return
@@ -389,6 +389,7 @@ def add_grouped_point_layers(
         add_point_layer(
             map_obj, gdf, "Facilities", "Purple",
             popup_fields=popup_fields, radius=radius, popup_kwds=popup_kwds,
+            tooltip_kwds=tooltip_kwds,
         )
         return
 
@@ -406,6 +407,7 @@ def add_grouped_point_layers(
         add_point_layer(
             map_obj, group_gdf, colored_name, color,
             popup_fields=popup_fields, radius=radius, popup_kwds=popup_kwds,
+            tooltip_kwds=tooltip_kwds,
         )
 
 
@@ -431,3 +433,47 @@ def render_map_legend(legend_items: List[str]) -> None:
 
     legend_text = "**Map Legend:**\n" + "\n".join(f"- {item}" for item in legend_items)
     st.info(legend_text)
+
+
+def render_folium_map(map_obj, height: int = 1000) -> None:
+    """
+    Render a folium map with height proportional to its rendered width (16:9).
+    Uses a JS ResizeObserver injected via components.html so it works in both
+    normal and wide/full-screen modes even after st_folium sets height via JS.
+    """
+    import streamlit.components.v1 as components
+    from streamlit_folium import st_folium
+
+    st_folium(map_obj, width=None, height=height, returned_objects=[])
+
+    # Inject 0-height iframe with JS that finds the map iframe (height > 100px)
+    # and resizes it to maintain 16:9, updating on every window resize.
+    components.html(
+        """
+        <script>
+        (function () {
+            try {
+                var doc = window.parent.document;
+                function resizeMaps() {
+                    doc.querySelectorAll(
+                        '[data-testid="stCustomComponentV1"] iframe'
+                    ).forEach(function (f) {
+                        if (f.offsetHeight > 100) {
+                            var w = f.getBoundingClientRect().width;
+                            if (w > 100) f.style.height = Math.round(w * 9 / 16) + 'px';
+                        }
+                    });
+                }
+                // Run shortly after map renders, then again to catch late paint
+                setTimeout(resizeMaps, 150);
+                setTimeout(resizeMaps, 600);
+                // Re-run whenever the window is resized (sidebar toggle, fullscreen, etc.)
+                doc.defaultView.addEventListener('resize', function () {
+                    setTimeout(resizeMaps, 80);
+                });
+            } catch (e) {}
+        })();
+        </script>
+        """,
+        height=0,
+    )

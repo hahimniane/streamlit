@@ -26,7 +26,7 @@ from components.map_rendering import (
     create_base_map, add_boundary_layers, add_point_layer,
     finalize_map, render_map_legend, render_folium_map,
 )
-from components.execute_button import render_execute_button
+from components.execute_button import render_execute_button, check_required_fields
 from components.analysis_state import AnalysisState, check_old_session_keys
 from components.step_execution import StepExecutor
 from components.query_debug import render_executed_queries
@@ -93,8 +93,11 @@ def main(context: AnalysisContext) -> None:
 
     conc_filter = render_concentration_filter(context.analysis_key, default_max=500)
 
+    can_execute, missing = check_required_fields(state=context.selected_state_code)
     execute_clicked = render_execute_button(
-        help_text="Execute the aquifer-connected wells analysis"
+        disabled=not can_execute,
+        missing_fields=missing,
+        help_text="Execute the aquifer-connected wells analysis" if can_execute else None,
     )
 
     preview_request = build_eta_request(
@@ -293,12 +296,16 @@ def _render_map(samplepts_df, aquifers_df, wells_df, boundaries, context) -> Non
         add_boundary_layers(map_obj, boundaries, context.region_code)
 
         if aquifers_gdf is not None and not aquifers_gdf.empty:
-            popup_cols = [c for c in ["aquifer"] if c in aquifers_gdf.columns]
+            aquifers_gdf["Aquifer ID"] = aquifers_gdf["aquifer"].apply(
+                lambda uri: f'<a href="{uri}" target="_blank">{str(uri).rsplit("/", 1)[-1].rsplit("#", 1)[-1]}</a>'
+                if pd.notna(uri) and str(uri).strip() else uri
+            )
             aquifers_gdf.explore(
                 m=map_obj,
                 color="RoyalBlue",
                 style_kwds={"fillOpacity": 0.25, "weight": 2, "color": "RoyalBlue"},
-                popup=popup_cols or True,
+                popup=["Aquifer ID"],
+                popup_kwds={"parse_html": True},
                 tooltip=False,
                 name='<span style="color:RoyalBlue;">Aquifers</span>',
                 show=True,

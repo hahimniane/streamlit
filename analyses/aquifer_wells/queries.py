@@ -47,8 +47,9 @@ def execute_aquifer_query(
 ) -> Tuple[pd.DataFrame, Optional[str], Dict[str, Any]]:
     """Find contaminated sample points, connected aquifers, and water wells.
 
-    Returns a flat DataFrame with one row per (sample, aquifer, well, observation)
-    combination.  The caller splits this into thematic DataFrames for display.
+    Returns a flat DataFrame with one row per (sample, aquifer, well) combination,
+    aggregated via GROUP BY with MAX concentration.  Only includes EGAD private
+    well/spring water (PWSW) sample points.
     """
     region_clause = _build_region_clause(region_code)
     substance_filter = sparql_values_uri("substance", substance_uri)
@@ -60,6 +61,7 @@ PREFIX geo: <http://www.opengis.net/ont/geosparql#>
 PREFIX gwml2: <http://gwml2.org/def/gwml2#>
 PREFIX kwg-ont: <http://stko-kwg.geog.ucsb.edu/lod/ontology/>
 PREFIX kwgr: <http://stko-kwg.geog.ucsb.edu/lod/resource/>
+PREFIX me_egad: <http://w3id.org/sawgraph/v1/me-egad#>
 PREFIX me_mgs: <http://sawgraph.spatialai.org/v1/me-mgs#>
 PREFIX qudt: <http://qudt.org/schema/qudt/>
 PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
@@ -67,9 +69,9 @@ PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 PREFIX spatial: <http://purl.org/spatialai/spatial/spatial-full#>
 PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
 
-SELECT DISTINCT ?sp ?spwkt ?aquifer ?aquiferwkt
+SELECT ?sp ?spwkt ?aquifer ?aquiferwkt
        ?well ?wellwkt ?welllabel ?welluse ?welltype ?welldepthft ?welloverburdenft
-       ?result_value ?numericValue
+       (MAX(?numericValue) AS ?maxConc)
 WHERE {{
     {region_clause}
     ?samples2 rdf:type kwg-ont:S2Cell_Level13 ;
@@ -92,7 +94,8 @@ WHERE {{
     BIND(CONCAT(str(?welldepth), " ft") AS ?welldepthft)
     BIND(CONCAT(str(?welloverburden), " ft") AS ?welloverburdenft)
 
-    ?sp rdf:type coso:SamplePoint ;
+    ?sp rdf:type me_egad:EGAD-SamplePoint ;
+        me_egad:samplePointType me_egad:featureType.PWSW ;
         geo:hasGeometry/geo:asWKT ?spwkt ;
         kwg-ont:sfWithin ?samples2 .
     ?obs rdf:type coso:ContaminantObservation ;
@@ -109,11 +112,13 @@ WHERE {{
     {substance_filter}
     {conc_filter}
 }}
+GROUP BY ?sp ?spwkt ?aquifer ?aquiferwkt
+         ?well ?wellwkt ?welllabel ?welluse ?welltype ?welldepthft ?welloverburdenft
 """
     js, error, debug_info = post_sparql_with_debug("federation", query, timeout=timeout)
     df = parse_sparql_results(js) if js else pd.DataFrame()
-    if not df.empty and "numericValue" in df.columns:
-        df["numericValue"] = pd.to_numeric(df["numericValue"], errors="coerce")
+    if not df.empty and "maxConc" in df.columns:
+        df["numericValue"] = pd.to_numeric(df["maxConc"], errors="coerce")
     return df, error, debug_info
 
 

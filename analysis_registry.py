@@ -152,7 +152,7 @@ def build_registry() -> dict[str, AnalysisSpec]:
             enabled=True,
             runner=aquifer_wells_main,
             region_config=RegionConfig(
-                state="optional",
+                state="required",
                 county="optional",
                 subdivision="optional",
                 availability_source="aquifer",

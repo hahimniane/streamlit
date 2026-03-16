@@ -280,12 +280,6 @@ def _render_map(samplepts_df, aquifers_df, wells_df, boundaries, context) -> Non
         samplepts_gdf = create_geodataframe(samplepts_df, "spwkt") if has_samples else None
         aquifers_gdf = create_geodataframe(aquifers_df, "aquiferwkt") if has_aquifers else None
         wells_gdf = create_geodataframe(wells_df, "wellwkt") if has_wells else None
-        # Well coordinates are stored as (lat, lon) instead of (lon, lat) — swap them
-        if wells_gdf is not None and not wells_gdf.empty:
-            from shapely.ops import transform
-            wells_gdf["geometry"] = wells_gdf["geometry"].apply(
-                lambda geom: transform(lambda x, y: (y, x), geom)
-            )
 
         active_gdfs = [g for g in [samplepts_gdf, aquifers_gdf, wells_gdf] if g is not None]
         if not active_gdfs:
@@ -338,5 +332,4 @@ def _render_map(samplepts_df, aquifers_df, wells_df, boundaries, context) -> Non
 
     except Exception as e:
         st.error(f"Error rendering map: {e}")
-
 

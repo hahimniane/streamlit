@@ -6,9 +6,7 @@ Find PFAS-tested sample points, connected aquifers, and water wells
 from __future__ import annotations
 
 import streamlit as st
-import folium
 import pandas as pd
-from folium.plugins.pattern import StripePattern
 
 from analysis_registry import AnalysisContext
 from analyses.aquifer_wells.queries import (
@@ -31,6 +29,7 @@ from components.result_display import render_step_results
 from components.map_rendering import (
     create_base_map, add_boundary_layers, add_point_layer,
     finalize_map, render_map_legend, render_folium_map,
+    COLOR_AQUIFER, COLOR_WELL, COLOR_SAMPLE,
 )
 from components.execute_button import render_execute_button, check_required_fields
 from components.analysis_state import AnalysisState, check_old_session_keys
@@ -286,16 +285,13 @@ def _render_map(samples_agg_df, aquifers_df, wells_df, boundaries, context) -> N
         add_boundary_layers(map_obj, boundaries, context.region_code)
 
         if aquifers_gdf is not None and not aquifers_gdf.empty:
-            aquifer_color = "blue"
-            sp = StripePattern(angle=-30, color=aquifer_color, space_color="white", space_opacity=0.75)
-            sp.add_to(map_obj)
             aquifers_gdf.explore(
                 m=map_obj,
-                color=aquifer_color,
-                style_kwds=dict(weight=2.5, style_function=lambda x: {"fillPattern": sp}),
+                color=COLOR_AQUIFER,
+                style_kwds={"fillOpacity": 0.15, "weight": 2.5, "color": COLOR_AQUIFER},
                 popup=["aquifer"],
                 tooltip=False,
-                name=f'<span style="color: {aquifer_color};">Aquifers</span>',
+                name=f'<span style="color: {COLOR_AQUIFER};">Aquifers</span>',
                 show=True,
             )
 
@@ -303,28 +299,24 @@ def _render_map(samples_agg_df, aquifers_df, wells_df, boundaries, context) -> N
             fields = [c for c in ["welllabel", "Well Use", "Well Type", "Well Depth (ft)", "Overburden (ft)"] if c in wells_gdf.columns]
             add_point_layer(
                 map_obj, wells_gdf,
-                name='<span style="color:DeepSkyBlue;">Connected Wells</span>',
-                color="DeepSkyBlue", popup_fields=fields, radius=5,
+                name=f'<span style="color:{COLOR_WELL};">Connected Wells</span>',
+                color=COLOR_WELL, popup_fields=fields, radius=5,
             )
 
         if samplepts_gdf is not None and not samplepts_gdf.empty:
             add_point_layer(
                 map_obj, samplepts_gdf,
-                name='<span style="color:Red;">Private Well Sample Points</span>',
-                color="Red", popup_fields=SAMPLE_POPUP_FIELDS, radius=7,
+                name=f'<span style="color:{COLOR_SAMPLE};">Sample Points</span>',
+                color=COLOR_SAMPLE, popup_fields=SAMPLE_POPUP_FIELDS, radius=7,
                 popup_kwds=SAMPLE_POPUP_KWDS,
             )
 
         finalize_map(map_obj)
-        # Use components.html instead of st_folium so the Leaflet.pattern
-        # plugin JS (required for StripePattern) is loaded correctly.
-        import streamlit.components.v1 as components
-        map_html = map_obj._repr_html_()
-        components.html(map_html, height=600)
+        render_folium_map(map_obj)
         render_map_legend([
-            "**Blue striped areas** = Aquifers connected to sample points",
-            "**Red circles** = Private well sample points",
-            "**Light blue circles** = Potentially connected water wells",
+            "**Striped areas** = Aquifers connected to sample points",
+            "**Orange circles** = Sample points",
+            "**Dark blue circles** = Potentially connected water wells",
             "**Boundary outline** = Selected region",
         ])
 

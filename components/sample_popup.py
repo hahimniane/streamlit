@@ -18,6 +18,9 @@ GROUP_COLS = ["samplePoint", "spWKT", "samplePointName"]
 
 SAMPLE_POPUP_FIELDS = ["samplePointName", "Max Result", "Samples"]
 
+# Lightweight popup fields — used when dataset is too large for full HTML popups
+SAMPLE_POPUP_FIELDS_LITE = ["samplePointName", "Max Substance", "Max Result (ng/L)", "Observations"]
+
 SAMPLE_POPUP_KWDS = {"max_width": 900, "max_height": 500, "parse_html": True}
 
 
@@ -175,3 +178,52 @@ def aggregate_sample_popups(
         .reset_index()
     )
     return agg
+
+
+def _group_to_lite(group: pd.DataFrame) -> pd.Series:
+    """Lightweight aggregation: max result + count only, no HTML."""
+    max_val = -1.0
+    max_substance = None
+    for _, row in group.iterrows():
+        r = row.get("result")
+        if _is_empty(r) or r == "non-detect":
+            continue
+        try:
+            v = float(r)
+            if v > max_val:
+                max_val = v
+                max_substance = row.get("substance")
+        except ValueError:
+            pass
+    return pd.Series({
+        "Max Substance": max_substance if max_val != -1.0 else None,
+        "Max Result (ng/L)": round(max_val, 2) if max_val != -1.0 else None,
+        "Observations": len(group),
+        "overall_max_result": max_val if max_val != -1.0 else None,
+    })
+
+
+def aggregate_sample_popups_lite(
+    df: pd.DataFrame,
+    group_cols: Optional[List[str]] = None,
+    column_map: Optional[Dict[str, str]] = None,
+) -> pd.DataFrame:
+    """Lightweight aggregation — plain text summary, no HTML.
+
+    Use this instead of aggregate_sample_popups when the dataset is large
+    to avoid embedding megabytes of HTML in the map GeoJSON.
+    """
+    if df.empty:
+        return df
+    work = df.copy()
+    if column_map:
+        work = work.rename(columns=column_map)
+    grp = group_cols or GROUP_COLS
+    available_grp = [c for c in grp if c in work.columns]
+    if not available_grp:
+        return work
+    return (
+        work.groupby(available_grp, dropna=False, sort=False)
+        .apply(_group_to_lite, include_groups=False)
+        .reset_index()
+    )

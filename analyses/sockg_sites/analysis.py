@@ -18,6 +18,7 @@ from components.result_display import render_step_results
 from components.map_rendering import (
     OTHER_FACILITY_MARKER_RADIUS,
     PFAS_FACILITY_MARKER_RADIUS,
+    FACILITY_COLORS_REDS, FACILITY_COLORS_PURPLES,
     create_base_map,
     add_point_layer,
     finalize_map,
@@ -208,8 +209,9 @@ def _render_map(sites_df, facilities_df, region_boundary_df, state_code) -> None
     if sites_gdf is not None and not sites_gdf.empty:
         sites_points = convert_to_centroids(sites_gdf)
         site_fields = [c for c in ["locationId", "locationDescription", "location"] if c in sites_points.columns]
+        site_color = FACILITY_COLORS_PURPLES[6]  # #6a51a3
         add_point_layer(map_obj, sites_points,
-            name='<span style="color:Red;">SOCKG Locations</span>', color='Red',
+            name=f'<span style="color:{site_color};">SOCKG Locations</span>', color=site_color,
             popup_fields=site_fields, radius=6,
             tooltip_kwds=dict(aliases=site_fields, localize=True, labels=True, sticky=False, style=tooltip_style),
             popup_kwds=dict(aliases=site_fields, localize=True, labels=True, style=tooltip_style))
@@ -225,16 +227,18 @@ def _render_map(sites_df, facilities_df, region_boundary_df, state_code) -> None
 
         tooltip_style_wide = tooltip_style.replace("450px", "650px")
 
+        other_color = FACILITY_COLORS_PURPLES[4]  # #9e9ac8
         if not other_facilities.empty:
             add_point_layer(map_obj, other_facilities,
-                name='<span style="color:MidnightBlue;">Other Facilities</span>', color='MidnightBlue',
+                name=f'<span style="color:{other_color};">Other Facilities</span>', color=other_color,
                 popup_fields=facility_fields, radius=OTHER_FACILITY_MARKER_RADIUS,
                 tooltip_kwds=dict(aliases=facility_fields, localize=True, labels=True, sticky=False, style=tooltip_style_wide),
                 popup_kwds=dict(aliases=facility_fields, localize=True, labels=True, style=tooltip_style_wide))
 
+        pfas_color = FACILITY_COLORS_REDS[6]  # #cb181d
         if not pfas_facilities.empty:
             add_point_layer(map_obj, pfas_facilities,
-                name='<span style="color:DarkRed;">PFAS-Related Facilities</span>', color='DarkRed',
+                name=f'<span style="color:{pfas_color};">PFAS-Related Facilities</span>', color=pfas_color,
                 popup_fields=pfas_fields, radius=PFAS_FACILITY_MARKER_RADIUS,
                 tooltip_kwds=dict(aliases=pfas_fields, localize=True, labels=True, sticky=False, style=tooltip_style_wide),
                 popup_kwds=dict(aliases=pfas_fields, localize=True, labels=True, style=tooltip_style_wide))
@@ -243,7 +247,7 @@ def _render_map(sites_df, facilities_df, region_boundary_df, state_code) -> None
     finalize_map(map_obj)
     render_folium_map(map_obj)
     render_map_legend([
-        "**Red circles** = SOCKG locations (ARS sites)",
-        "**Dark blue circles** = Other facilities",
-        "**Dark red circles** = PFAS-related facilities"
+        "**Purple circles** = SOCKG locations (ARS sites)",
+        "**Light purple circles** = Other facilities",
+        "**Red circles** = PFAS-related facilities"
     ])

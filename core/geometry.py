@@ -75,6 +75,22 @@ def get_map_center(
     return default_center
 
 
+def simplify_geometries(
+    gdf: gpd.GeoDataFrame,
+    tolerance: float = 0.001,
+) -> gpd.GeoDataFrame:
+    """Simplify geometries to reduce data size for map rendering.
+
+    Uses Douglas-Peucker simplification. A tolerance of 0.001 degrees
+    (~100 m) works well for state-level maps without visible loss.
+    """
+    if gdf is None or gdf.empty:
+        return gdf
+    result = gdf.copy()
+    result["geometry"] = result.geometry.simplify(tolerance, preserve_topology=True)
+    return result
+
+
 def convert_to_centroids(gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
     """
     Convert all geometries in a GeoDataFrame to their centroids.

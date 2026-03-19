@@ -34,16 +34,32 @@ POPUP_CSS = """
 </style>
 """
 
-# Default color palette for industry/category layers
-LAYER_COLORS = [
-    'MidnightBlue', 'MediumBlue', 'SlateBlue', 'MediumSlateBlue',
-    'DodgerBlue', 'DeepSkyBlue', 'SkyBlue', 'CadetBlue', 'DarkCyan',
-    'LightSeaGreen', 'MediumSeaGreen', 'PaleVioletRed', 'Purple',
-    'Orchid', 'Fuchsia', 'MediumVioletRed', 'HotPink', 'LightPink',
-    'red', 'lightred', 'pink', 'orange', 'lightblue', 'gray', 'blue',
-    'darkred', 'lightgreen', 'green', 'darkblue', 'darkpurple',
-    'cadetblue', 'lightgray', 'darkgreen'
+# ---------------------------------------------------------------------------
+# Design-system color palette (ColorBrewer2)
+# See: https://github.com/SAWGraph/explorer-app/wiki/Design-System-References
+# ---------------------------------------------------------------------------
+
+# Water features — PuBu sequential
+COLOR_WATERSHED = "#d0d1e6"
+COLOR_AQUIFER = "#74a9cf"
+COLOR_FLOWLINE = "#2b8cbe"
+COLOR_WELL = "#045a8d"
+
+# Sample points — PuOr diverging (orange side for normal samples)
+COLOR_SAMPLE = "#fdb863"
+
+# Facilities — 9-class Reds (primary), 9-class Purples (secondary)
+FACILITY_COLORS_REDS = [
+    "#fff5f0", "#fee0d2", "#fcbba1", "#fc9272", "#fb6a4a",
+    "#ef3b2c", "#cb181d", "#a50f15", "#67000d",
 ]
+FACILITY_COLORS_PURPLES = [
+    "#fcfbfd", "#efedf5", "#dadaeb", "#bcbddc", "#9e9ac8",
+    "#807dba", "#6a51a3", "#54278f", "#3f007d",
+]
+
+# Default color palette for grouped facility/industry layers (9-class Reds)
+LAYER_COLORS = FACILITY_COLORS_REDS
 
 # Shared marker sizing defaults.
 # Update these values to tune marker sizes app-wide.

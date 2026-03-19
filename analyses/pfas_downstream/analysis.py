@@ -18,7 +18,7 @@ from filters.concentration import render_concentration_filter, apply_concentrati
 
 # Shared components
 from core.boundary import fetch_boundaries
-from core.geometry import create_geodataframe
+from core.geometry import create_geodataframe, simplify_geometries
 from core.sparql import build_query_debug_entry
 from components.parameter_display import (
     build_concentration_params,
@@ -29,6 +29,7 @@ from components.parameter_display import (
 from components.result_display import render_metrics_row, render_data_expander
 from components.map_rendering import (
     FACILITY_MARKER_RADIUS,
+    COLOR_SAMPLE, COLOR_FLOWLINE, FACILITY_COLORS_REDS,
     add_facility_link_column,
     add_naics_link_column,
     add_naics_url_column,
@@ -307,7 +308,7 @@ def _render_map(facilities_df, streams_df, samples_agg_df, boundaries, context) 
     st.markdown("### Interactive Map")
 
     facilities_gdf = create_geodataframe(facilities_df, 'facWKT') if has_facilities else None
-    streams_gdf = create_geodataframe(streams_df, 'dsflWKT') if has_streams else None
+    streams_gdf = simplify_geometries(create_geodataframe(streams_df, 'dsflWKT')) if has_streams else None
     samples_gdf = create_geodataframe(samples_agg_df, 'spWKT') if has_samples else None
 
     # Add facility links and NAICS code links
@@ -334,21 +335,22 @@ def _render_map(facilities_df, streams_df, samples_agg_df, boundaries, context) 
                     pass
             return {"radius": max(3, min(12, radius)), "opacity": 0.3, "color": "DimGray"}
 
-        samples_gdf.explore(m=map_obj, name='<span style="color:DarkOrange;">Samples</span>',
-            color="DarkOrange", marker_kwds=dict(radius=6), marker_type="circle_marker",
+        samples_gdf.explore(m=map_obj, name=f'<span style="color:{COLOR_SAMPLE};">Samples</span>',
+            color=COLOR_SAMPLE, marker_kwds=dict(radius=6), marker_type="circle_marker",
             popup=SAMPLE_POPUP_FIELDS, popup_kwds=SAMPLE_POPUP_KWDS,
             style_kwds=dict(style_function=_sample_style))
 
     # Add streams
     if streams_gdf is not None and not streams_gdf.empty:
         stream_popup = [c for c in ["streamName", "fl_type", "downstream_flowline"] if c in streams_gdf.columns]
-        add_line_layer(map_obj, streams_gdf, '<span style="color:LightSkyBlue;">Streams</span>',
-                       'LightSkyBlue', popup_fields=stream_popup)
+        add_line_layer(map_obj, streams_gdf, f'<span style="color:{COLOR_FLOWLINE};">Streams</span>',
+                       COLOR_FLOWLINE, popup_fields=stream_popup)
 
     # Add facilities
     if facilities_gdf is not None and not facilities_gdf.empty:
         fields = [c for c in ["Facility ID", "facilityName", "industryName", "NAICS Code"] if c in facilities_gdf.columns]
         add_grouped_point_layers(map_obj, facilities_gdf, 'industryName', popup_fields=fields, radius=FACILITY_MARKER_RADIUS,
+                                 colors=FACILITY_COLORS_REDS,
                                  popup_kwds={"max_width": 900, "parse_html": True},
                                  tooltip_kwds={"parse_html": True})
 
@@ -357,8 +359,8 @@ def _render_map(facilities_df, streams_df, samples_agg_df, boundaries, context) 
     render_map_legend([
         "**Boundary outline** = Selected region",
         "**Orange circles** = PFAS samples downstream",
-        "**Light blue lines** = Downstream flow paths",
-        "**Purple/pink markers** = Facilities (by industry)"
+        "**Blue lines** = Downstream flow paths",
+        "**Red markers** = Facilities (by industry)"
     ])
 
     # Stream names

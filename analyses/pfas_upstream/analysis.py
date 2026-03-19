@@ -24,6 +24,7 @@ from components.parameter_display import (
 from components.result_display import render_step_results
 from components.map_rendering import (
     FACILITY_MARKER_RADIUS,
+    COLOR_SAMPLE, COLOR_FLOWLINE, FACILITY_COLORS_REDS,
     add_facility_link_column,
     add_naics_link_column,
     add_naics_url_column,
@@ -375,12 +376,12 @@ def _render_map(samples_agg_df, facilities_df, upstream_s2_df, upstream_flowline
     add_boundary_layers(map_obj, boundaries, context.region_code)
 
     if flowlines_gdf is not None and not flowlines_gdf.empty:
-        add_line_layer(map_obj, flowlines_gdf, '<span style="color:DodgerBlue;">Upstream Flowlines</span>',
-                       'DodgerBlue', weight=3, opacity=0.5)
+        add_line_layer(map_obj, flowlines_gdf, f'<span style="color:{COLOR_FLOWLINE};">Upstream Flowlines</span>',
+                       COLOR_FLOWLINE, weight=3, opacity=0.5)
 
     if samples_gdf is not None and not samples_gdf.empty:
-        add_point_layer(map_obj, samples_gdf, '<span style="color:DarkOrange;">PFAS Samples</span>',
-                        'DarkOrange', popup_fields=SAMPLE_POPUP_FIELDS, radius=8,
+        add_point_layer(map_obj, samples_gdf, f'<span style="color:{COLOR_SAMPLE};">PFAS Samples</span>',
+                        COLOR_SAMPLE, popup_fields=SAMPLE_POPUP_FIELDS, radius=8,
                         popup_kwds=SAMPLE_POPUP_KWDS)
 
     if facilities_gdf is not None and not facilities_gdf.empty:
@@ -395,6 +396,7 @@ def _render_map(samples_agg_df, facilities_df, upstream_s2_df, upstream_flowline
             facilities_gdf = add_facility_link_column(facilities_gdf)
         fields = [c for c in ["facilityName", "industryName", "NAICS Code", "Facility ID"] if c in facilities_gdf.columns]
         add_grouped_point_layers(map_obj, facilities_gdf, group_col, popup_fields=fields, radius=FACILITY_MARKER_RADIUS,
+                                 colors=FACILITY_COLORS_REDS,
                                  popup_kwds={"parse_html": True},
                                  tooltip_kwds={"parse_html": True})
 
@@ -403,6 +405,6 @@ def _render_map(samples_agg_df, facilities_df, upstream_s2_df, upstream_flowline
     render_map_legend([
         "**Orange circles** = PFAS sample locations",
         "**Blue lines** = Upstream flow paths",
-        "**Colored markers** = Upstream facilities (by industry)",
+        "**Red markers** = Upstream facilities (by industry)",
         "**Boundary outline** = Selected region"
     ])

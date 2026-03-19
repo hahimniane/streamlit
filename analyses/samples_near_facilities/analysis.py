@@ -28,6 +28,7 @@ from components.parameter_display import (
 from components.result_display import render_step_results
 from components.map_rendering import (
     FACILITY_MARKER_RADIUS,
+    COLOR_SAMPLE, FACILITY_COLORS_REDS,
     add_facility_link_column,
     add_naics_link_column,
     add_naics_url_column,
@@ -291,25 +292,26 @@ def _render_map(facilities_df, samples_agg_df, industry_display, boundaries, que
         if "industryCode" in facilities_gdf.columns:
             facilities_gdf = add_naics_link_column(facilities_gdf)
 
+        facility_color = FACILITY_COLORS_REDS[6]  # #cb181d — strong red
         facility_fields = [c for c in ["Facility ID", "facilityName", "industryName", "NAICS Code"] if c in facilities_gdf.columns]
         add_point_layer(map_obj, facilities_gdf,
-            name=f'<span style="color:Blue;">{industry_display} ({len(facilities_gdf)})</span>',
-            color='Blue', popup_fields=facility_fields, radius=FACILITY_MARKER_RADIUS,
+            name=f'<span style="color:{facility_color};">{industry_display} ({len(facilities_gdf)})</span>',
+            color=facility_color, popup_fields=facility_fields, radius=FACILITY_MARKER_RADIUS,
             popup_kwds={"max_width": 650, "parse_html": True},
             tooltip_kwds={"sticky": True, "parse_html": True})
 
         # Add samples with rich popup
         if samples_gdf is not None and not samples_gdf.empty:
             add_point_layer(map_obj, samples_gdf,
-                name=f'<span style="color:DarkOrange;">PFAS Samples ({len(samples_gdf)})</span>',
-                color='DarkOrange', popup_fields=SAMPLE_POPUP_FIELDS, radius=6,
+                name=f'<span style="color:{COLOR_SAMPLE};">PFAS Samples ({len(samples_gdf)})</span>',
+                color=COLOR_SAMPLE, popup_fields=SAMPLE_POPUP_FIELDS, radius=6,
                 popup_kwds=SAMPLE_POPUP_KWDS)
 
         finalize_map(map_obj)
         render_folium_map(map_obj)
         render_map_legend([
             "**Boundary** = Selected region",
-            "**Blue markers** = Facilities of selected industry type",
+            "**Red markers** = Facilities of selected industry type",
             "**Orange markers** = PFAS sample points nearby"
         ])
 

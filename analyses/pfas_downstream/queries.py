@@ -177,7 +177,11 @@ def execute_downstream_samples_query(
     max_conc: float = 500.0,
     include_nondetects: bool = False,
 ) -> Tuple[pd.DataFrame, Optional[str], Dict[str, Any]]:
-    """Step 3: Find contaminated samples downstream of facilities."""
+    """Step 3: Find raw per-observation sample rows downstream of facilities.
+
+    Returns one row per observation with columns: samplePoint, samplePointName,
+    spWKT, sample, sampleIdentifier, date, substance, result, unit, sampleType.
+    """
     if facility_uris is not None and not isinstance(facility_uris, list):
         facility_uris = None
 
@@ -211,12 +215,8 @@ PREFIX hyf: <https://www.opengis.net/def/schema/hy_features/hyf/>
 PREFIX owl: <http://www.w3.org/2002/07/owl#>
 PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
 
-SELECT DISTINCT ?samplePoint ?spWKT ?sample
-    (GROUP_CONCAT(DISTINCT ?sampleId; separator="; ") as ?samples)
-    (COUNT(DISTINCT ?subVal) as ?resultCount)
-    (MAX(?numericValue) as ?Max)
-    ?unit
-    (GROUP_CONCAT(DISTINCT ?subVal; separator=" <br> ") as ?results)
+SELECT DISTINCT ?samplePoint ?samplePointName ?spWKT
+    ?sample ?sampleIdentifier ?date ?substance ?result ?unit ?sampleType
 WHERE {{
     {{ SELECT DISTINCT ?s2cell WHERE {{
         ?s2origin spatial:connectedTo ?facility.
@@ -244,33 +244,33 @@ WHERE {{
     ?samplePoint spatial:connectedTo ?s2cell ;
         rdf:type coso:SamplePoint ;
         geo:hasGeometry/geo:asWKT ?spWKT .
+    OPTIONAL {{ ?samplePoint rdfs:label ?samplePointName }}
     ?s2cell rdf:type kwg-ont:S2Cell_Level13.
-    ?sample coso:fromSamplePoint ?samplePoint;
-        dcterms:identifier ?sampleId;
-        coso:sampleOfMaterialType/rdfs:label ?type.
+    ?sample coso:fromSamplePoint ?samplePoint .
+    OPTIONAL {{ ?sample dcterms:identifier ?sampleIdentifier }}
+    OPTIONAL {{ ?sample coso:sampleOfMaterialType/rdfs:label ?sampleType }}
     ?observation rdf:type coso:ContaminantObservation;
         coso:observedAtSamplePoint ?samplePoint;
         coso:ofDSSToxSubstance/skos:altLabel ?substance;
         coso:hasResult ?res .
-    ?res coso:measurementValue ?result_value;
+    OPTIONAL {{ ?observation coso:observedTime ?date }}
+    ?res coso:measurementValue ?result;
         coso:measurementUnit/qudt:symbol ?unit.
     OPTIONAL {{ ?res qudt:quantityValue/qudt:numericValue ?numericResult }}
     OPTIONAL {{ ?res qudt:enumeratedValue ?enumDetected }}
     BIND(
-      (BOUND(?enumDetected) || LCASE(STR(?result_value)) = "non-detect" || STR(?result_value) = STR(coso:non-detect))
+      (BOUND(?enumDetected) || LCASE(STR(?result)) = "non-detect" || STR(?result) = STR(coso:non-detect))
       as ?isNonDetect
     )
     BIND(
       IF(
         ?isNonDetect,
         0,
-        COALESCE(xsd:decimal(?numericResult), xsd:decimal(?result_value))
+        COALESCE(xsd:decimal(?numericResult), xsd:decimal(?result))
       ) as ?numericValue
     )
     {conc_filter}
-    BIND((CONCAT(?substance, ": ", str(?result_value) , " ", ?unit) ) as ?subVal)
-
-}} GROUP BY ?samplePoint ?spWKT ?sample ?unit
+}}
 """
     results_json, error, debug_info = post_sparql_with_debug("federation", query)
     if error or not results_json:

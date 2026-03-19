@@ -8,41 +8,12 @@ import pandas as pd
 from typing import Any, Dict, Optional, Tuple
 
 from core.sparql import (
-    ENDPOINT_URLS,
     concentration_filter_sparql,
     parse_sparql_results,
     post_sparql_with_debug,
 )
 from core.naics_utils import build_naics_values_and_hierarchy, normalize_naics_codes
 
-
-# Alias for backward compatibility
-ENDPOINTS = ENDPOINT_URLS
-
-
-def _normalize_samples_df(samples_df: pd.DataFrame) -> pd.DataFrame:
-    """Normalize sample columns to a common shape for UI display."""
-    if samples_df.empty:
-        return samples_df
-
-    if "max" not in samples_df.columns and "maxConcentration" in samples_df.columns:
-        samples_df = samples_df.rename(columns={"maxConcentration": "max"})
-    if "Materials" not in samples_df.columns and "materials" in samples_df.columns:
-        samples_df = samples_df.rename(columns={"materials": "Materials"})
-    if "results" not in samples_df.columns and "substances" in samples_df.columns:
-        samples_df["results"] = samples_df["substances"]
-    if "datedresults" not in samples_df.columns:
-        samples_df["datedresults"] = ""
-    if "dates" not in samples_df.columns:
-        samples_df["dates"] = ""
-    if "Type" not in samples_df.columns:
-        samples_df["Type"] = ""
-
-    for col in ("max", "resultCount"):
-        if col in samples_df.columns:
-            samples_df[col] = pd.to_numeric(samples_df[col], errors="coerce")
-
-    return samples_df
 
 
 def _build_industry_filter(naics_code: str | list[str]) -> tuple[str, str]:
@@ -126,40 +97,18 @@ def execute_nearby_samples_query(
     max_concentration: float = 500.0,
     include_nondetects: bool = False,
 ) -> Tuple[pd.DataFrame, Optional[str], Dict[str, Any]]:
-    """Step 2: Find PFAS samples near industry facilities."""
+    """Step 2: Find raw per-observation PFAS sample rows near industry facilities.
+
+    Returns one row per observation with columns: samplePoint, samplePointName,
+    spWKT, sample, sampleIdentifier, date, substance, result, unit, sampleType.
+    """
     industry_values, industry_hierarchy = _build_industry_filter(naics_code)
     region_filter = _build_region_filter(region_code)
-
-    if include_nondetects:
-        concentration_filter = concentration_filter_sparql(min_concentration, max_concentration, True)
-        nondetect_fragment = """
-    OPTIONAL { ?result qudt:enumeratedValue ?enumDetected }
-    BIND(
-      (BOUND(?enumDetected) || LCASE(STR(?result_value)) = "non-detect" || STR(?result_value) = STR(coso:non-detect))
-      as ?isNonDetect
-    )
-    BIND(
-      IF(
-        ?isNonDetect,
-        0,
-        COALESCE(xsd:decimal(?numericResult), xsd:decimal(?result_value))
-      ) as ?numericValue
-    )
-"""
-    else:
-        concentration_filter = "\n".join(
-            [
-                "FILTER(BOUND(?numericValue))",
-                "FILTER(?numericValue > 0)",
-                f"FILTER (?numericValue >= {min_concentration} && ?numericValue <= {max_concentration})",
-            ]
-        )
-        nondetect_fragment = """
-    BIND(COALESCE(xsd:decimal(?numericResult), xsd:decimal(?result_value)) as ?numericValue)
-"""
+    conc_filter = concentration_filter_sparql(min_concentration, max_concentration, include_nondetects)
 
     query = f"""
 PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
+PREFIX dcterms: <http://purl.org/dc/terms/>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 PREFIX owl: <http://www.w3.org/2002/07/owl#>
@@ -174,7 +123,8 @@ PREFIX naics: <http://w3id.org/fio/v1/naics#>
 PREFIX coso: <http://w3id.org/coso/v1/contaminoso#>
 PREFIX qudt: <http://qudt.org/schema/qudt/>
 
-SELECT DISTINCT (COUNT(DISTINCT ?observation) as ?resultCount) (MAX(?numericValue) as ?max) (GROUP_CONCAT(DISTINCT ?subVal; separator="</br>") as ?results) (GROUP_CONCAT(DISTINCT ?datedSubVal; separator="</br>") as ?datedresults) (GROUP_CONCAT(?year; separator=" </br> ") as ?dates) (GROUP_CONCAT(DISTINCT ?Typelabels; separator=";") as ?Type) (GROUP_CONCAT(DISTINCT ?material) as ?Materials) ?sp ?spName ?spWKT
+SELECT DISTINCT ?samplePoint ?samplePointName ?spWKT
+    ?sample ?sampleIdentifier ?date ?substance ?result ?unit ?sampleType
 WHERE {{
 
     {{SELECT DISTINCT ?s2neighbor WHERE {{
@@ -193,41 +143,41 @@ WHERE {{
         ?s2neighbor rdf:type kwg-ont:S2Cell_Level13 .
     }} }}
 
-    ?sp rdf:type coso:SamplePoint;
+    ?samplePoint rdf:type coso:SamplePoint;
         spatial:connectedTo ?s2neighbor;
-        rdfs:label ?spName;
         geo:hasGeometry/geo:asWKT ?spWKT.
+    OPTIONAL {{ ?samplePoint rdfs:label ?samplePointName }}
     ?observation rdf:type coso:ContaminantObservation;
-        coso:observedAtSamplePoint ?sp;
+        coso:observedAtSamplePoint ?samplePoint;
         coso:ofSubstance ?substance1;
-        coso:observedTime ?time;
         coso:analyzedSample ?sample;
-        coso:hasResult ?result.
-    ?sample rdfs:label ?sampleLabel;
-            coso:sampleOfMaterialType/rdfs:label ?material.
-    {{SELECT ?sample (GROUP_CONCAT(DISTINCT ?sampleClassLabel; separator=";") as ?Typelabels) WHERE {{
-        ?sample a ?sampleClass.
-        ?sampleClass rdfs:label ?sampleClassLabel.
-        VALUES ?sampleClass {{coso:WaterSample coso:AnimalMaterialSample coso:PlantMaterialSample coso:SolidMaterialSample}}
-    }} GROUP BY ?sample }}
-    ?result coso:measurementValue ?result_value;
-            coso:measurementUnit ?unit.
-    OPTIONAL {{ ?result qudt:quantityValue/qudt:numericValue ?numericResult }}
-    {nondetect_fragment}
+        coso:hasResult ?resultNode.
+    OPTIONAL {{ ?observation coso:observedTime ?date }}
+    OPTIONAL {{ ?sample dcterms:identifier ?sampleIdentifier }}
+    OPTIONAL {{ ?sample coso:sampleOfMaterialType/rdfs:label ?sampleType }}
+    ?resultNode coso:measurementValue ?result;
+               coso:measurementUnit ?unitURI.
+    OPTIONAL {{ ?resultNode qudt:quantityValue/qudt:numericValue ?numericResult }}
+    OPTIONAL {{ ?resultNode qudt:enumeratedValue ?enumDetected }}
+    BIND(
+      (BOUND(?enumDetected) || LCASE(STR(?result)) = "non-detect" || STR(?result) = STR(coso:non-detect))
+      as ?isNonDetect
+    )
+    BIND(
+      IF(
+        ?isNonDetect,
+        0,
+        COALESCE(xsd:decimal(?numericResult), xsd:decimal(?result))
+      ) as ?numericValue
+    )
     ?substance1 rdfs:label ?substance.
-    ?unit qudt:symbol ?unit_sym.
-    {concentration_filter}
-    BIND(SUBSTR(?time, 1, 7) as ?year)
-    BIND(CONCAT('<b>',str(?result_value), '</b>', " ", ?unit_sym, " ", ?substance) as ?subVal)
-    BIND(CONCAT(?year, ' <b> ',str(?result_value), '</b>', " ", ?unit_sym, " ", ?substance) as ?datedSubVal)
-}} GROUP BY ?sp ?spName ?spWKT
-ORDER BY DESC(?max)
+    ?unitURI qudt:symbol ?unit.
+    {conc_filter}
+}}
 """
 
     results_json, error, debug_info = post_sparql_with_debug("federation", query)
     samples_df = parse_sparql_results(results_json) if results_json else pd.DataFrame()
-    if not samples_df.empty:
-        samples_df = _normalize_samples_df(samples_df)
     debug_info.update(
         {
             "label": "Step 2: Nearby Samples",
@@ -238,30 +188,3 @@ ORDER BY DESC(?max)
     return samples_df, error, debug_info
 
 
-def execute_nearby_analysis(
-    naics_code: str | list[str],
-    region_code: Optional[str],
-    min_concentration: float = 0.0,
-    max_concentration: float = 500.0,
-    include_nondetects: bool = False,
-) -> Tuple[pd.DataFrame, pd.DataFrame, Dict[str, Any]]:
-    """
-    Compatibility wrapper that runs both nearby queries and returns old shape.
-    """
-    facilities_df, facilities_error, facilities_debug = execute_nearby_facilities_query(
-        naics_code=naics_code,
-        region_code=region_code,
-    )
-    samples_df, samples_error, samples_debug = execute_nearby_samples_query(
-        naics_code=naics_code,
-        region_code=region_code,
-        min_concentration=min_concentration,
-        max_concentration=max_concentration,
-        include_nondetects=include_nondetects,
-    )
-
-    debug_info: Dict[str, Any] = {
-        "queries": [facilities_debug, samples_debug],
-        "errors": [e for e in [facilities_error, samples_error] if e],
-    }
-    return facilities_df, samples_df, debug_info

@@ -10,7 +10,7 @@ import pandas as pd
 from analysis_registry import AnalysisContext
 from analyses.pfas_upstream.queries import run_upstream
 from filters.industry import render_sidebar_industry_selector
-from filters.substance import get_cached_substances_with_labels
+from filters.substance import render_sidebar_substance_selector
 from filters.material import get_cached_material_types_with_labels
 from filters.concentration import render_concentration_filter, apply_concentration_filter
 
@@ -29,6 +29,11 @@ from components.map_rendering import (
     add_naics_url_column,
     create_base_map, add_boundary_layers, add_point_layer,
     add_line_layer, add_grouped_point_layers, finalize_map, render_map_legend, render_folium_map
+)
+from components.sample_popup import (
+    aggregate_sample_popups,
+    SAMPLE_POPUP_FIELDS,
+    SAMPLE_POPUP_KWDS,
 )
 from components.execute_button import render_execute_button
 from components.analysis_state import AnalysisState, check_old_session_keys
@@ -69,38 +74,15 @@ def main(context: AnalysisContext) -> None:
     st.sidebar.markdown("### Query Parameters")
 
     # Substance selector
-    is_subdivision = len(context.region_code) > 5 if context.region_code else False
-
-    substances_view = (
-        get_cached_substances_with_labels(context.region_code, is_subdivision)
-        if context.region_code
-        else pd.DataFrame()
+    selected_substance_uri, selected_substance_name = render_sidebar_substance_selector(
+        region_code=context.region_code,
+        analysis_key=context.analysis_key,
     )
-
-    st.sidebar.markdown("### PFAS Substance")
-    substance_map = {}
-    if not substances_view.empty:
-        for _, row in substances_view.iterrows():
-            name = row["display_name"]
-            uri = row["substance"]
-            if name not in substance_map or uri.endswith("_A"):
-                substance_map[name] = uri
-
-    selected_substance_display = st.sidebar.selectbox(
-        "Select PFAS Substance (Optional)",
-        ["-- All Substances --"] + sorted(substance_map.keys()),
-        help="Select a specific PFAS compound to analyze, or leave as 'All Substances'",
-    )
-
-    selected_substance_uri = None
-    selected_substance_name = None
-    if selected_substance_display != "-- All Substances --":
-        selected_substance_name = selected_substance_display
-        selected_substance_uri = substance_map.get(selected_substance_display)
 
     st.sidebar.markdown("---")
 
     # Material type selector
+    is_subdivision = len(context.region_code) > 5 if context.region_code else False
     st.sidebar.markdown("### Sample Material Type")
     material_types_view = (
         get_cached_material_types_with_labels(context.region_code, is_subdivision)
@@ -246,10 +228,17 @@ def main(context: AnalysisContext) -> None:
                 step_eta_by_label=step_eta_by_label,
             )
 
+            # Aggregate raw samples for map popups
+            samples_agg_df = (
+                aggregate_sample_popups(samples_df)
+                if not samples_df.empty else pd.DataFrame()
+            )
+
             state.set('executed_queries', executed_queries)
             # Store results
             state.set_results({
                 'samples_df': samples_df,
+                'samples_agg_df': samples_agg_df,
                 'upstream_s2_df': upstream_s2_df,
                 'upstream_flowlines_df': upstream_flowlines_df,
                 'facilities_df': facilities_df,
@@ -266,6 +255,7 @@ def main(context: AnalysisContext) -> None:
     if state.has_results:
         results = state.get_results()
         samples_df = results.get('samples_df', pd.DataFrame())
+        samples_agg_df = results.get('samples_agg_df', pd.DataFrame())
         upstream_s2_df = results.get('upstream_s2_df', pd.DataFrame())
         upstream_flowlines_df = results.get('upstream_flowlines_df', pd.DataFrame())
         facilities_df = results.get('facilities_df', pd.DataFrame())
@@ -281,11 +271,17 @@ def main(context: AnalysisContext) -> None:
 
         # Step 1 Results
         if not samples_df.empty:
-            metrics = [{"label": "Total Samples", "value": len(samples_df)}]
-            if 'sp' in samples_df.columns:
-                metrics.append({"label": "Unique Sample Points", "value": samples_df['sp'].nunique()})
-            if 'matType' in samples_df.columns:
-                metrics.append({"label": "Material Type", "value": saved_material_name or "All"})
+            n_sample_points = samples_df['samplePoint'].nunique() if 'samplePoint' in samples_df.columns else len(samples_agg_df)
+            metrics = [
+                {"label": "Total Observations", "value": len(samples_df)},
+                {"label": "Unique Sample Points", "value": n_sample_points},
+            ]
+            if saved_material_name:
+                metrics.append({"label": "Material Type", "value": saved_material_name})
+            if not samples_agg_df.empty and "overall_max_result" in samples_agg_df.columns:
+                max_vals = pd.to_numeric(samples_agg_df["overall_max_result"], errors="coerce")
+                if max_vals.notna().any():
+                    metrics.append({"label": "Max Concentration", "value": f"{max_vals.max():.2f} ng/L"})
             render_step_results("Step 1: PFAS Samples", samples_df, metrics, "View PFAS Samples Data",
                 download_filename=f"contaminated_samples_{query_region_code}.csv",
                 download_key=f"download_{context.analysis_key}_samples",
@@ -322,7 +318,7 @@ def main(context: AnalysisContext) -> None:
                 _render_industry_breakdown(facilities_df)
 
         # Map
-        _render_map(samples_df, facilities_df, upstream_s2_df, upstream_flowlines_df, boundaries, context)
+        _render_map(samples_agg_df, facilities_df, upstream_s2_df, upstream_flowlines_df, boundaries, context)
 
 
 def _render_industry_breakdown(facilities_df: pd.DataFrame) -> None:
@@ -351,9 +347,9 @@ def _render_industry_breakdown(facilities_df: pd.DataFrame) -> None:
                      use_container_width=True, hide_index=True)
 
 
-def _render_map(samples_df, facilities_df, upstream_s2_df, upstream_flowlines_df, boundaries, context) -> None:
+def _render_map(samples_agg_df, facilities_df, upstream_s2_df, upstream_flowlines_df, boundaries, context) -> None:
     """Render the interactive map."""
-    has_samples = not samples_df.empty and 'spWKT' in samples_df.columns
+    has_samples = not samples_agg_df.empty and 'spWKT' in samples_agg_df.columns
     has_facilities = not facilities_df.empty and 'facWKT' in facilities_df.columns
 
     if not has_samples and not has_facilities:
@@ -362,7 +358,7 @@ def _render_map(samples_df, facilities_df, upstream_s2_df, upstream_flowlines_df
     st.markdown("---")
     st.markdown("### Interactive Map")
 
-    samples_gdf = create_geodataframe(samples_df, 'spWKT') if has_samples else None
+    samples_gdf = create_geodataframe(samples_agg_df, 'spWKT') if has_samples else None
     facilities_gdf = create_geodataframe(facilities_df, 'facWKT') if has_facilities else None
 
     # Handle flowlines
@@ -383,9 +379,9 @@ def _render_map(samples_df, facilities_df, upstream_s2_df, upstream_flowlines_df
                        'DodgerBlue', weight=3, opacity=0.5)
 
     if samples_gdf is not None and not samples_gdf.empty:
-        fields = [c for c in ["sp", "result_value", "substance", "matType", "regionURI"] if c in samples_gdf.columns]
         add_point_layer(map_obj, samples_gdf, '<span style="color:DarkOrange;">PFAS Samples</span>',
-                        'DarkOrange', popup_fields=fields, radius=8)
+                        'DarkOrange', popup_fields=SAMPLE_POPUP_FIELDS, radius=8,
+                        popup_kwds=SAMPLE_POPUP_KWDS)
 
     if facilities_gdf is not None and not facilities_gdf.empty:
         group_col = 'industryName'

@@ -20,6 +20,8 @@ from filters.region import (
 from filters.substance import (
     get_available_substances,
     get_available_substances_with_labels,
+    get_cached_substances_with_labels,
+    render_sidebar_substance_selector,
 )
 
 from filters.material import (
@@ -52,6 +54,8 @@ __all__ = [
     # Substance
     "get_available_substances",
     "get_available_substances_with_labels",
+    "get_cached_substances_with_labels",
+    "render_sidebar_substance_selector",
     # Material
     "get_available_material_types",
     "get_available_material_types_with_labels",

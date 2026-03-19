@@ -147,7 +147,7 @@ def build_registry() -> dict[str, AnalysisSpec]:
             key="aquifer_wells",
             label="Aquifer-Connected Wells",
             title="💧 Aquifer-Connected Wells",
-            description="Find PFAS-contaminated sample points, connected aquifers, and potentially at-risk water wells.",
+            description="Find PFAS sample points, connected aquifers, and potentially at-risk water wells.",
             query=7,
             enabled=True,
             runner=aquifer_wells_main,

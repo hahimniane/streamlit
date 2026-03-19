@@ -1,16 +1,22 @@
 """
 Aquifer-Connected Wells Analysis
-Find PFAS-contaminated sample points, connected aquifers, and water wells
+Find PFAS-tested sample points, connected aquifers, and water wells
 (Maine MGS) that may be at risk through shared aquifer connectivity.
 """
 from __future__ import annotations
 
 import streamlit as st
+import folium
 import pandas as pd
+from folium.plugins.pattern import StripePattern
 
 from analysis_registry import AnalysisContext
-from analyses.aquifer_wells.queries import execute_aquifer_query
-from filters.substance import get_cached_substances_with_labels
+from analyses.aquifer_wells.queries import (
+    execute_aquifer_samples_query,
+    execute_aquifer_aquifers_query,
+    execute_aquifer_wells_query,
+)
+from filters.substance import render_sidebar_substance_selector
 from filters.concentration import render_concentration_filter, apply_concentration_filter
 
 from core.boundary import fetch_boundaries
@@ -31,6 +37,11 @@ from components.analysis_state import AnalysisState, check_old_session_keys
 from components.step_execution import StepExecutor
 from components.query_debug import render_executed_queries
 from components.eta_display import render_simple_eta
+from components.sample_popup import (
+    aggregate_sample_popups,
+    SAMPLE_POPUP_FIELDS,
+    SAMPLE_POPUP_KWDS,
+)
 from core.runtime_eta import (
     build_eta_request,
     estimate_eta,
@@ -44,15 +55,15 @@ def main(context: AnalysisContext) -> None:
 
     st.markdown("""
     **What this analysis does:**
-    - Finds PFAS-contaminated sample points in your selected region
+    - Finds PFAS-tested sample points in your selected region
     - Identifies aquifers spatially connected to those sample points
     - Finds water wells connected to those same aquifers that may be at risk
 
-    **Process:** Find contaminated samples -> Identify connected aquifers -> Find at-risk wells
+    **Process:** Find tested samples -> Identify connected aquifers -> Find at-risk wells
 
     **Use case:** Determine if water wells may be at risk through shared aquifer connectivity to PFAS contamination
 
-   
+
     """)
 
     state = AnalysisState(context.analysis_key)
@@ -61,33 +72,10 @@ def main(context: AnalysisContext) -> None:
     # === SIDEBAR PARAMETERS ===
     st.sidebar.markdown("### Query Parameters")
 
-    is_subdivision = len(context.region_code) > 5 if context.region_code else False
-    substances_view = (
-        get_cached_substances_with_labels(context.region_code, is_subdivision)
-        if context.region_code
-        else pd.DataFrame()
+    selected_substance_uri, selected_substance_name = render_sidebar_substance_selector(
+        region_code=context.region_code,
+        analysis_key=context.analysis_key,
     )
-
-    st.sidebar.markdown("### PFAS Substance")
-    substance_map = {}
-    if not substances_view.empty:
-        for _, row in substances_view.iterrows():
-            name = row["display_name"]
-            uri = row["substance"]
-            if name not in substance_map or str(uri).endswith("_A"):
-                substance_map[name] = uri
-
-    selected_substance_display = st.sidebar.selectbox(
-        "Select PFAS Substance (Optional)",
-        ["-- All Substances --"] + sorted(substance_map.keys()),
-        help="Filter to a specific PFAS compound, or leave as 'All Substances'",
-    )
-
-    selected_substance_uri = None
-    selected_substance_name = None
-    if selected_substance_display != "-- All Substances --":
-        selected_substance_name = selected_substance_display
-        selected_substance_uri = substance_map.get(selected_substance_display)
 
     st.sidebar.markdown("---")
 
@@ -131,58 +119,66 @@ def main(context: AnalysisContext) -> None:
         )
         run_eta = estimate_eta(run_request)
 
-        executor = StepExecutor(num_steps=1)
-        combined_df = pd.DataFrame()
+        executor = StepExecutor(num_steps=3)
+        samples_raw_df = pd.DataFrame()
+        aquifers_df = pd.DataFrame()
+        wells_df = pd.DataFrame()
         executed_queries = []
         step_eta_by_label = {s.label: s for s in run_eta.step_estimates}
 
-        with executor.step(1, "Finding samples, aquifers & connected wells...") as step:
-            combined_df, error, debug = execute_aquifer_query(
-                region_code=context.region_code,
-                substance_uri=selected_substance_uri,
-                min_conc=min_conc,
-                max_conc=max_conc,
-                include_nondetects=include_nondetects,
-            )
+        query_args = dict(
+            region_code=context.region_code,
+            substance_uri=selected_substance_uri,
+            min_conc=min_conc,
+            max_conc=max_conc,
+            include_nondetects=include_nondetects,
+        )
+
+        with executor.step(1, "Finding sample observations...") as step:
+            samples_raw_df, error, debug = execute_aquifer_samples_query(**query_args)
             step_info = build_query_debug_entry(
-                "Step 1: Samples, Aquifers & Wells", debug,
-                row_count=len(combined_df), error=error,
+                "Step 1: Sample Observations", debug,
+                row_count=len(samples_raw_df), error=error,
             )
             executed_queries.append(step_info)
             if error:
-                step.error(f"Query failed: {error}")
-            elif not combined_df.empty:
-                n_sp = combined_df["sp"].nunique() if "sp" in combined_df.columns else 0
-                n_aq = combined_df["aquifer"].nunique() if "aquifer" in combined_df.columns else 0
-                n_wl = combined_df["well"].nunique() if "well" in combined_df.columns else 0
-                step.success(f"Found {n_sp} sample points, {n_aq} aquifer(s), {n_wl} well(s)")
+                step.error(f"Step 1 failed: {error}")
+            elif not samples_raw_df.empty:
+                n_sp = samples_raw_df["samplePoint"].nunique() if "samplePoint" in samples_raw_df.columns else 0
+                step.success(f"Step 1: Found {len(samples_raw_df)} observations across {n_sp} sample points")
             else:
-                step.warning("No results found for the selected parameters")
+                step.warning("Step 1: No sample observations found")
 
-        # Split combined result into thematic DataFrames
-        samplepts_df = pd.DataFrame()
-        aquifers_df = pd.DataFrame()
-        wells_df = pd.DataFrame()
-        if not combined_df.empty:
-            if "sp" in combined_df.columns and "spwkt" in combined_df.columns:
-                samplepts_df = (
-                    combined_df.groupby(["sp", "spwkt"], as_index=False)
-                    .agg(max_conc=("numericValue", "max"))
-                )
-            if "aquifer" in combined_df.columns and "aquiferwkt" in combined_df.columns:
-                aquifers_df = (
-                    combined_df[["aquifer", "aquiferwkt"]]
-                    .drop_duplicates(subset=["aquifer"])
-                    .reset_index(drop=True)
-                )
-            well_cols = ["well", "welllabel", "welluse", "welltype", "welldepthft", "welloverburdenft", "wellwkt"]
-            available_well_cols = [c for c in well_cols if c in combined_df.columns]
-            if available_well_cols and "well" in combined_df.columns:
-                wells_df = (
-                    combined_df[available_well_cols]
-                    .drop_duplicates(subset=["well"])
-                    .reset_index(drop=True)
-                )
+        with executor.step(2, "Finding connected aquifers...") as step:
+            aquifers_df, error, debug = execute_aquifer_aquifers_query(**query_args)
+            step_info = build_query_debug_entry(
+                "Step 2: Aquifers", debug,
+                row_count=len(aquifers_df), error=error,
+            )
+            executed_queries.append(step_info)
+            if error:
+                step.error(f"Step 2 failed: {error}")
+            elif not aquifers_df.empty:
+                step.success(f"Step 2: Found {len(aquifers_df)} aquifer(s)")
+            else:
+                step.warning("Step 2: No aquifers found")
+
+        with executor.step(3, "Finding connected wells...") as step:
+            wells_df, error, debug = execute_aquifer_wells_query(**query_args)
+            step_info = build_query_debug_entry(
+                "Step 3: Connected Wells", debug,
+                row_count=len(wells_df), error=error,
+            )
+            executed_queries.append(step_info)
+            if error:
+                step.error(f"Step 3 failed: {error}")
+            elif not wells_df.empty:
+                step.success(f"Step 3: Found {len(wells_df)} well(s)")
+            else:
+                step.warning("Step 3: No connected wells found")
+
+        # Aggregate raw samples for map popups
+        samples_agg_df = aggregate_sample_popups(samples_raw_df) if not samples_raw_df.empty else pd.DataFrame()
 
         boundaries = fetch_boundaries(context.selected_state_code, context.selected_county_code)
 
@@ -193,7 +189,8 @@ def main(context: AnalysisContext) -> None:
         )
         state.set("executed_queries", executed_queries)
         state.set_results({
-            "samplepts_df": samplepts_df,
+            "samples_raw_df": samples_raw_df,
+            "samples_agg_df": samples_agg_df,
             "aquifers_df": aquifers_df,
             "wells_df": wells_df,
             "boundaries": boundaries,
@@ -211,7 +208,8 @@ def main(context: AnalysisContext) -> None:
     # === DISPLAY RESULTS ===
     if state.has_results:
         results = state.get_results()
-        samplepts_df = results.get("samplepts_df", pd.DataFrame())
+        samples_raw_df = results.get("samples_raw_df", pd.DataFrame())
+        samples_agg_df = results.get("samples_agg_df", pd.DataFrame())
         aquifers_df = results.get("aquifers_df", pd.DataFrame())
         wells_df = results.get("wells_df", pd.DataFrame())
         boundaries = results.get("boundaries", {})
@@ -223,19 +221,17 @@ def main(context: AnalysisContext) -> None:
         st.markdown("### Query Results")
         st.markdown("---")
 
-        if not samplepts_df.empty:
-            metrics = [{"label": "Contaminated Sample Points", "value": len(samplepts_df)}]
-            if "max_conc" in samplepts_df.columns:
-                vals = pd.to_numeric(samplepts_df["max_conc"], errors="coerce")
+        if not samples_agg_df.empty:
+            metrics = [{"label": "Sample Points", "value": len(samples_agg_df)}]
+            if "overall_max_result" in samples_agg_df.columns:
+                vals = pd.to_numeric(samples_agg_df["overall_max_result"], errors="coerce")
                 if vals.notna().any():
                     metrics.append({"label": "Max Concentration", "value": f"{vals.max():.2f} ng/L"})
             render_step_results(
-                "Contaminated Sample Points", samplepts_df, metrics,
-                "View Sample Points Data",
-                display_columns=["sp", "max_conc"],
-                download_filename=f"aquifer_samplepts_{query_region_code or 'all'}.csv",
-                download_key=f"download_{context.analysis_key}_samplepts",
-                show_stats=True, stats_column="max_conc",
+                "Sample Points", samples_raw_df, metrics,
+                "View Sample Observations Data",
+                download_filename=f"aquifer_samples_{query_region_code or 'all'}.csv",
+                download_key=f"download_{context.analysis_key}_samples",
             )
 
         if not aquifers_df.empty:
@@ -253,20 +249,20 @@ def main(context: AnalysisContext) -> None:
                 "Connected Wells", wells_df,
                 [{"label": "Connected Wells", "value": len(wells_df)}],
                 "View Wells Data",
-                display_columns=["welllabel", "welluse", "welltype", "welldepthft", "welloverburdenft", "well"],
+                display_columns=["welllabel", "Well Use", "Well Type", "Well Depth (ft)", "Overburden (ft)", "well"],
                 download_filename=f"aquifer_wells_{query_region_code or 'all'}.csv",
                 download_key=f"download_{context.analysis_key}_wells",
             )
 
-        _render_map(samplepts_df, aquifers_df, wells_df, boundaries, context)
+        _render_map(samples_agg_df, aquifers_df, wells_df, boundaries, context)
 
     else:
         st.info("Select parameters in the sidebar and click 'Execute Query' to run the analysis.")
 
 
-def _render_map(samplepts_df, aquifers_df, wells_df, boundaries, context) -> None:
+def _render_map(samples_agg_df, aquifers_df, wells_df, boundaries, context) -> None:
     """Render the interactive 3-layer map: aquifer polygons, sample points, wells."""
-    has_samples = not samplepts_df.empty and "spwkt" in samplepts_df.columns
+    has_samples = not samples_agg_df.empty and "spWKT" in samples_agg_df.columns
     has_aquifers = not aquifers_df.empty and "aquiferwkt" in aquifers_df.columns
     has_wells = not wells_df.empty and "wellwkt" in wells_df.columns
 
@@ -277,7 +273,7 @@ def _render_map(samplepts_df, aquifers_df, wells_df, boundaries, context) -> Non
     st.markdown("### Interactive Map")
 
     try:
-        samplepts_gdf = create_geodataframe(samplepts_df, "spwkt") if has_samples else None
+        samplepts_gdf = create_geodataframe(samples_agg_df, "spWKT") if has_samples else None
         aquifers_gdf = create_geodataframe(aquifers_df, "aquiferwkt") if has_aquifers else None
         wells_gdf = create_geodataframe(wells_df, "wellwkt") if has_wells else None
 
@@ -290,23 +286,21 @@ def _render_map(samplepts_df, aquifers_df, wells_df, boundaries, context) -> Non
         add_boundary_layers(map_obj, boundaries, context.region_code)
 
         if aquifers_gdf is not None and not aquifers_gdf.empty:
-            aquifers_gdf["Aquifer ID"] = aquifers_gdf["aquifer"].apply(
-                lambda uri: f'<a href="{uri}" target="_blank">{str(uri).rsplit("/", 1)[-1].rsplit("#", 1)[-1]}</a>'
-                if pd.notna(uri) and str(uri).strip() else uri
-            )
+            aquifer_color = "blue"
+            sp = StripePattern(angle=-30, color=aquifer_color, space_color="white", space_opacity=0.75)
+            sp.add_to(map_obj)
             aquifers_gdf.explore(
                 m=map_obj,
-                color="RoyalBlue",
-                style_kwds={"fillOpacity": 0.25, "weight": 2, "color": "RoyalBlue"},
-                popup=["Aquifer ID"],
-                popup_kwds={"parse_html": True},
+                color=aquifer_color,
+                style_kwds=dict(weight=2.5, style_function=lambda x: {"fillPattern": sp}),
+                popup=["aquifer"],
                 tooltip=False,
-                name='<span style="color:RoyalBlue;">Aquifers</span>',
+                name=f'<span style="color: {aquifer_color};">Aquifers</span>',
                 show=True,
             )
 
         if wells_gdf is not None and not wells_gdf.empty:
-            fields = [c for c in ["welllabel", "welluse", "welltype", "welldepthft", "welloverburdenft"] if c in wells_gdf.columns]
+            fields = [c for c in ["welllabel", "Well Use", "Well Type", "Well Depth (ft)", "Overburden (ft)"] if c in wells_gdf.columns]
             add_point_layer(
                 map_obj, wells_gdf,
                 name='<span style="color:DeepSkyBlue;">Connected Wells</span>',
@@ -314,17 +308,21 @@ def _render_map(samplepts_df, aquifers_df, wells_df, boundaries, context) -> Non
             )
 
         if samplepts_gdf is not None and not samplepts_gdf.empty:
-            fields = [c for c in ["sp", "max_conc"] if c in samplepts_gdf.columns]
             add_point_layer(
                 map_obj, samplepts_gdf,
                 name='<span style="color:Red;">Private Well Sample Points</span>',
-                color="Red", popup_fields=fields, radius=7,
+                color="Red", popup_fields=SAMPLE_POPUP_FIELDS, radius=7,
+                popup_kwds=SAMPLE_POPUP_KWDS,
             )
 
         finalize_map(map_obj)
-        render_folium_map(map_obj)
+        # Use components.html instead of st_folium so the Leaflet.pattern
+        # plugin JS (required for StripePattern) is loaded correctly.
+        import streamlit.components.v1 as components
+        map_html = map_obj._repr_html_()
+        components.html(map_html, height=600)
         render_map_legend([
-            "**Blue polygons** = Aquifers connected to contaminated sample points",
+            "**Blue striped areas** = Aquifers connected to sample points",
             "**Red circles** = Private well sample points",
             "**Light blue circles** = Potentially connected water wells",
             "**Boundary outline** = Selected region",
@@ -332,4 +330,3 @@ def _render_map(samplepts_df, aquifers_df, wells_df, boundaries, context) -> Non
 
     except Exception as e:
         st.error(f"Error rendering map: {e}")
-

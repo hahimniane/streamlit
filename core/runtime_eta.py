@@ -70,8 +70,9 @@ STEP_PRIORS_MS: dict[str, dict[str, tuple[float, float, float]]] = {
         "Step 2: SOCKG Nearby Facilities": (4000.0, 7000.0, 12000.0),
     },
     "aquifer_wells": {
-        "Step 1: Contaminated Samples & Aquifers": (5000.0, 12000.0, 25000.0),
-        "Step 2: Connected Wells": (2000.0, 5000.0, 10000.0),
+        "Step 1: Sample Observations": (5000.0, 12000.0, 25000.0),
+        "Step 2: Aquifers": (3000.0, 8000.0, 15000.0),
+        "Step 3: Connected Wells": (2000.0, 5000.0, 10000.0),
     },
 }
 

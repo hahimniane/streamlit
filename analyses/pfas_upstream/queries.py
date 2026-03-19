@@ -108,9 +108,10 @@ def run_upstream(
     upstream_flowlines_df = pd.DataFrame()
     facilities_df = pd.DataFrame()
 
-    # Step 1: Contaminated samples
+    # Step 1: PFAS samples (raw per-observation rows)
     q1 = f"""
 PREFIX coso: <http://w3id.org/coso/v1/contaminoso#>
+PREFIX dcterms: <http://purl.org/dc/terms/>
 PREFIX geo: <http://www.opengis.net/ont/geosparql#>
 PREFIX hyf: <https://www.opengis.net/def/schema/hy_features/hyf/>
 PREFIX kwg-ont: <http://stko-kwg.geog.ucsb.edu/lod/ontology/>
@@ -118,15 +119,19 @@ PREFIX kwgr: <http://stko-kwg.geog.ucsb.edu/lod/resource/>
 PREFIX owl: <http://www.w3.org/2002/07/owl#>
 PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+PREFIX skos: <http://www.w3.org/2004/02/skos/core#>
 PREFIX spatial: <http://purl.org/spatialai/spatial/spatial-full#>
 PREFIX qudt: <http://qudt.org/schema/qudt/>
 PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
 
-SELECT (COUNT(DISTINCT ?subVal) as ?resultCount) (MAX(?result_value) as ?maxResultValue) (SAMPLE(?substance) as ?substanceSample) (SAMPLE(?matType) as ?matTypeSample) (SAMPLE(?regionURI) as ?regionURISample) ?sp ?spWKT ?s2cell WHERE {{
-    ?sp rdf:type coso:SamplePoint ;
+SELECT DISTINCT ?samplePoint ?samplePointName ?spWKT ?s2cell
+    ?sample ?sampleIdentifier ?date ?substance ?result ?unit ?sampleType
+WHERE {{
+    ?samplePoint rdf:type coso:SamplePoint ;
         geo:hasGeometry/geo:asWKT ?spWKT ;
         spatial:connectedTo ?regionURI ;
         spatial:connectedTo ?s2 .
+    OPTIONAL {{ ?samplePoint rdfs:label ?samplePointName }}
     ?regionURI rdf:type kwg-ont:AdministrativeRegion_3 .
     {region_pattern}
     ?s2 rdf:type kwg-ont:S2Cell_Level13 .
@@ -135,23 +140,27 @@ SELECT (COUNT(DISTINCT ?subVal) as ?resultCount) (MAX(?result_value) as ?maxResu
              spatial:connectedTo ?waterbody .
     ?waterbody a hyf:HY_WaterBody .
     ?observation rdf:type coso:ContaminantObservation ;
-                coso:observedAtSamplePoint ?sp ;
-                coso:ofSubstance ?substance ;
+                coso:observedAtSamplePoint ?samplePoint ;
+                coso:ofSubstance ?substanceURI ;
                 coso:analyzedSample ?sample ;
-                coso:hasResult ?result .
+                coso:hasResult ?resultNode .
+    ?substanceURI rdfs:label ?substance .
     ?sample coso:sampleOfMaterialType ?matType .
-    ?result coso:measurementValue ?result_value ;
-            coso:measurementUnit ?unit .
-    OPTIONAL {{ ?result qudt:quantityValue/qudt:numericValue ?numericResult }}
-    OPTIONAL {{ ?result qudt:enumeratedValue ?enumDetected }}
-    BIND( (BOUND(?enumDetected) || LCASE(STR(?result_value)) = "non-detect" || STR(?result_value) = STR(coso:non-detect)) as ?isNonDetect )
-    BIND( IF(?isNonDetect, 0, COALESCE(xsd:decimal(?numericResult), xsd:decimal(?result_value))) as ?numericValue )
-    VALUES ?unit {{ <http://qudt.org/vocab/unit/NanoGM-PER-L> }}
+    OPTIONAL {{ ?sample coso:sampleOfMaterialType/rdfs:label ?sampleType }}
+    OPTIONAL {{ ?sample dcterms:identifier ?sampleIdentifier }}
+    OPTIONAL {{ ?observation coso:observedTime ?date }}
+    ?resultNode coso:measurementValue ?result ;
+               coso:measurementUnit ?unitURI .
+    ?unitURI qudt:symbol ?unit .
+    OPTIONAL {{ ?resultNode qudt:quantityValue/qudt:numericValue ?numericResult }}
+    OPTIONAL {{ ?resultNode qudt:enumeratedValue ?enumDetected }}
+    BIND( (BOUND(?enumDetected) || LCASE(STR(?result)) = "non-detect" || STR(?result) = STR(coso:non-detect)) as ?isNonDetect )
+    BIND( IF(?isNonDetect, 0, COALESCE(xsd:decimal(?numericResult), xsd:decimal(?result))) as ?numericValue )
+    VALUES ?unitURI {{ <http://qudt.org/vocab/unit/NanoGM-PER-L> }}
     {subst_filter}
     {mat_filter}
     {conc_filter}
-    BIND(CONCAT(STR(?result_value), " ", "ng/L") as ?subVal)
-}} GROUP BY ?sp ?spWKT ?s2cell
+}}
 """
     js1, err1, dbg1 = post_sparql_with_debug("federation", q1, timeout=timeout)
     executed_queries.append(
@@ -166,18 +175,6 @@ SELECT (COUNT(DISTINCT ?subVal) as ?resultCount) (MAX(?result_value) as ?maxResu
     if err1:
         return samples_df, pd.DataFrame(), upstream_flowlines_df, facilities_df, executed_queries, err1
     samples_df = parse_sparql_results(js1) if js1 else pd.DataFrame()
-    if not samples_df.empty:
-        renames = {}
-        if "maxResultValue" in samples_df.columns:
-            renames["maxResultValue"] = "result_value"
-        if "substanceSample" in samples_df.columns:
-            renames["substanceSample"] = "substance"
-        if "matTypeSample" in samples_df.columns:
-            renames["matTypeSample"] = "matType"
-        if "regionURISample" in samples_df.columns:
-            renames["regionURISample"] = "regionURI"
-        if renames:
-            samples_df = samples_df.rename(columns=renames)
 
     # Step 2: Upstream flowlines
     q2 = f"""

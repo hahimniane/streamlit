@@ -26,14 +26,19 @@ from components.parameter_display import (
     build_region_params,
     render_parameter_table,
 )
-from components.result_display import render_metrics_row, render_data_expander, clean_unit_encoding
+from components.result_display import render_metrics_row, render_data_expander
 from components.map_rendering import (
     FACILITY_MARKER_RADIUS,
     add_facility_link_column,
     add_naics_link_column,
     add_naics_url_column,
-    create_base_map, add_boundary_layers, add_line_layer,
+    create_base_map, add_boundary_layers, add_point_layer, add_line_layer,
     add_grouped_point_layers, finalize_map, render_map_legend, render_folium_map
+)
+from components.sample_popup import (
+    aggregate_sample_popups,
+    SAMPLE_POPUP_FIELDS,
+    SAMPLE_POPUP_KWDS,
 )
 from components.execute_button import render_execute_button, check_required_fields
 from components.analysis_state import AnalysisState, check_old_session_keys
@@ -195,6 +200,9 @@ def main(context: AnalysisContext) -> None:
                 else:
                     step.info("Step 3: No downstream samples found")
 
+            # Aggregate raw samples for map popups
+            samples_agg_df = aggregate_sample_popups(samples_df) if not samples_df.empty else pd.DataFrame()
+
             record_executed_query_batch(
                 request=run_request,
                 executed_queries=executed_queries,
@@ -202,7 +210,8 @@ def main(context: AnalysisContext) -> None:
             )
             state.set("executed_queries", executed_queries)
             state.set_results({
-                "facilities_df": facilities_df, "streams_df": streams_df, "samples_df": samples_df,
+                "facilities_df": facilities_df, "streams_df": streams_df,
+                "samples_df": samples_df, "samples_agg_df": samples_agg_df,
                 "boundaries": boundaries, "params_data": params_data,
                 "query_region_code": context.region_code, "selected_industry": selected_industry_display,
                 "executed_queries": executed_queries,
@@ -216,6 +225,7 @@ def main(context: AnalysisContext) -> None:
         facilities_df = results.get('facilities_df', pd.DataFrame())
         streams_df = results.get('streams_df', pd.DataFrame())
         samples_df = results.get('samples_df', pd.DataFrame())
+        samples_agg_df = results.get('samples_agg_df', pd.DataFrame())
         boundaries = results.get('boundaries', {})
         params_data = results.get('params_data', [])
         query_region_code = results.get('query_region_code')
@@ -264,31 +274,31 @@ def main(context: AnalysisContext) -> None:
         # Step 3: Samples
         if not samples_df.empty:
             st.markdown("### Step 3: Downstream Samples")
-            metrics = [{"label": "Total Samples", "value": len(samples_df)}]
-            if 'samplePoint' in samples_df.columns:
-                metrics.append({"label": "Unique Sample Points", "value": samples_df['samplePoint'].nunique()})
-            if 'Max' in samples_df.columns:
-                max_vals = pd.to_numeric(samples_df['Max'], errors='coerce')
+            n_sample_points = samples_df['samplePoint'].nunique() if 'samplePoint' in samples_df.columns else 0
+            metrics = [
+                {"label": "Total Observations", "value": len(samples_df)},
+                {"label": "Unique Sample Points", "value": n_sample_points},
+            ]
+            if not samples_agg_df.empty and "overall_max_result" in samples_agg_df.columns:
+                max_vals = pd.to_numeric(samples_agg_df["overall_max_result"], errors="coerce")
                 if max_vals.notna().any():
                     metrics.append({"label": "Max Concentration", "value": f"{max_vals.max():.2f} ng/L"})
             render_metrics_row(metrics, num_columns=3)
             render_data_expander("View Samples Data", samples_df,
-                display_columns=['Max', 'resultCount', 'unit', 'results', 'samplePoint', 'sample'],
                 download_filename=f"downstream_samples_{query_region_code or 'all'}.csv",
-                download_key=f"download_{context.analysis_key}_samples",
-                show_stats=True, stats_column='Max')
+                download_key=f"download_{context.analysis_key}_samples")
 
         # Map
-        _render_map(facilities_df, streams_df, samples_df, boundaries, context)
+        _render_map(facilities_df, streams_df, samples_agg_df, boundaries, context)
     else:
         st.info("Select an industry type in the sidebar, then click 'Execute Query' to run the analysis")
 
 
-def _render_map(facilities_df, streams_df, samples_df, boundaries, context) -> None:
+def _render_map(facilities_df, streams_df, samples_agg_df, boundaries, context) -> None:
     """Render the interactive map."""
     has_facilities = not facilities_df.empty and 'facWKT' in facilities_df.columns
     has_streams = not streams_df.empty and 'dsflWKT' in streams_df.columns
-    has_samples = not samples_df.empty and 'spWKT' in samples_df.columns
+    has_samples = not samples_agg_df.empty and 'spWKT' in samples_agg_df.columns
 
     if not has_facilities and not has_streams and not has_samples:
         return
@@ -298,7 +308,7 @@ def _render_map(facilities_df, streams_df, samples_df, boundaries, context) -> N
 
     facilities_gdf = create_geodataframe(facilities_df, 'facWKT') if has_facilities else None
     streams_gdf = create_geodataframe(streams_df, 'dsflWKT') if has_streams else None
-    samples_gdf = create_geodataframe(samples_df, 'spWKT') if has_samples else None
+    samples_gdf = create_geodataframe(samples_agg_df, 'spWKT') if has_samples else None
 
     # Add facility links and NAICS code links
     if facilities_gdf is not None and 'facility' in facilities_gdf.columns:
@@ -306,36 +316,27 @@ def _render_map(facilities_df, streams_df, samples_df, boundaries, context) -> N
     if facilities_gdf is not None and 'industryCode' in facilities_gdf.columns:
         facilities_gdf = add_naics_link_column(facilities_gdf)
 
-    # Clean sample data
-    if samples_gdf is not None:
-        samples_gdf = clean_unit_encoding(samples_gdf)
-
     map_obj = create_base_map(gdf_list=[samples_gdf, facilities_gdf, streams_gdf], zoom=8)
     add_boundary_layers(map_obj, boundaries, context.region_code, warn_fn=st.warning)
 
-    # Add samples with custom styling
+    # Add samples with rich popup
     if samples_gdf is not None and not samples_gdf.empty:
         def _sample_style(feature):
             props = (feature or {}).get("properties", {}) or {}
-            max_val = props.get("Max")
-            is_nondetect = max_val in ["non-detect", "http://w3id.org/coso/v1/contaminoso#non-detect"]
-            if not is_nondetect:
-                try:
-                    is_nondetect = float(max_val) == 0
-                except:
-                    pass
+            max_val = props.get("overall_max_result")
             radius = 4
-            if not is_nondetect:
+            if max_val is not None:
                 try:
                     v = float(max_val)
-                    radius = 4 if v < 40 else (v / 16 if v < 160 else 12)
-                except:
+                    if v > 0:
+                        radius = 4 if v < 40 else (v / 16 if v < 160 else 12)
+                except (ValueError, TypeError):
                     pass
-            return {"radius": max(3, min(12, radius)), "opacity": 0.3, "color": "Black" if is_nondetect else "DimGray"}
+            return {"radius": max(3, min(12, radius)), "opacity": 0.3, "color": "DimGray"}
 
         samples_gdf.explore(m=map_obj, name='<span style="color:DarkOrange;">Samples</span>',
             color="DarkOrange", marker_kwds=dict(radius=6), marker_type="circle_marker",
-            popup=True, popup_kwds={"max_height": 500, "max_width": 650},
+            popup=SAMPLE_POPUP_FIELDS, popup_kwds=SAMPLE_POPUP_KWDS,
             style_kwds=dict(style_function=_sample_style))
 
     # Add streams

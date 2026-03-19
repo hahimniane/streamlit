@@ -1,6 +1,6 @@
 """
 Samples Near Facilities Analysis (Query 2)
-Find contaminated samples near facilities of a specific industry type
+Find PFAS samples near facilities of a specific industry type
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ from components.parameter_display import (
     build_region_params,
     render_parameter_table,
 )
-from components.result_display import clean_unit_encoding, render_step_results
+from components.result_display import render_step_results
 from components.map_rendering import (
     FACILITY_MARKER_RADIUS,
     add_facility_link_column,
@@ -37,6 +37,11 @@ from components.map_rendering import (
     finalize_map,
     render_map_legend,
     render_folium_map,
+)
+from components.sample_popup import (
+    aggregate_sample_popups,
+    SAMPLE_POPUP_FIELDS,
+    SAMPLE_POPUP_KWDS,
 )
 from components.execute_button import render_execute_button
 from components.analysis_state import AnalysisState, check_old_session_keys
@@ -166,6 +171,12 @@ def main(context: AnalysisContext) -> None:
             else:
                 step.info("Step 2: No PFAS samples found")
 
+        # Aggregate raw samples for map popups
+        samples_agg_df = (
+            aggregate_sample_popups(samples_df)
+            if not samples_df.empty else pd.DataFrame()
+        )
+
         record_executed_query_batch(
             request=run_request,
             executed_queries=executed_queries,
@@ -176,6 +187,7 @@ def main(context: AnalysisContext) -> None:
         state.set("executed_queries", executed_queries)
         state.set_results({
             "facilities_df": facilities_df, "samples_df": samples_df,
+            "samples_agg_df": samples_agg_df,
             "industry_display": selected_industry_display, "boundaries": boundaries,
             "params_data": [
                 build_industry_params(selected_industry_display),
@@ -194,6 +206,7 @@ def main(context: AnalysisContext) -> None:
         results = state.get_results()
         facilities_df = results.get("facilities_df", pd.DataFrame())
         samples_df = results.get("samples_df", pd.DataFrame())
+        samples_agg_df = results.get("samples_agg_df", pd.DataFrame())
         industry_display = results.get("industry_display", "")
         boundaries = results.get("boundaries", {})
         params_data = results.get("params_data", [])
@@ -226,25 +239,23 @@ def main(context: AnalysisContext) -> None:
 
         # Step 2: Samples
         if not samples_df.empty:
-            metrics = [{"label": "Total Samples", "value": len(samples_df)}]
-            if 'sp' in samples_df.columns:
-                metrics.append({"label": "Unique Sample Points", "value": samples_df['sp'].nunique()})
-            if 'max' in samples_df.columns:
-                max_vals = pd.to_numeric(samples_df['max'], errors='coerce')
+            n_sample_points = samples_df['samplePoint'].nunique() if 'samplePoint' in samples_df.columns else len(samples_agg_df)
+            metrics = [
+                {"label": "Total Observations", "value": len(samples_df)},
+                {"label": "Unique Sample Points", "value": n_sample_points},
+            ]
+            if not samples_agg_df.empty and "overall_max_result" in samples_agg_df.columns:
+                max_vals = pd.to_numeric(samples_agg_df["overall_max_result"], errors="coerce")
                 if max_vals.notna().any():
                     metrics.append({"label": "Max Concentration", "value": f"{max_vals.max():.2f} ng/L"})
 
-            samples_display = clean_unit_encoding(samples_df, columns=['unit', 'datedresults', 'results'])
-            render_step_results("Step 2: PFAS Samples", samples_display, metrics, "View Samples Data",
-                display_columns=['max', 'resultCount', 'datedresults', 'Materials', 'Type', 'spName', 'sp'],
+            render_step_results("Step 2: PFAS Samples", samples_df, metrics, "View Samples Data",
                 download_filename=f"near_facilities_samples_{query_region_code or 'all'}.csv",
                 download_key=f"download_{context.analysis_key}_samples",
-                show_stats=True,
-                stats_column='max',
             )
 
         # Map
-        _render_map(facilities_df, samples_df, industry_display, boundaries, query_region_code, context)
+        _render_map(facilities_df, samples_agg_df, industry_display, boundaries, query_region_code, context)
 
         if facilities_df.empty and samples_df.empty:
             st.warning("No results found. Try a different industry type or region.")
@@ -252,7 +263,7 @@ def main(context: AnalysisContext) -> None:
         st.info("Select parameters in the sidebar and click 'Execute Query' to run the analysis")
 
 
-def _render_map(facilities_df, samples_df, industry_display, boundaries, query_region_code, context) -> None:
+def _render_map(facilities_df, samples_agg_df, industry_display, boundaries, query_region_code, context) -> None:
     """Render the interactive map."""
     if facilities_df.empty or 'facWKT' not in facilities_df.columns:
         if not facilities_df.empty:
@@ -267,7 +278,11 @@ def _render_map(facilities_df, samples_df, industry_display, boundaries, query_r
         if facilities_gdf is None or facilities_gdf.empty:
             return
 
-        map_obj = create_base_map(gdf_list=[facilities_gdf], zoom=8)
+        samples_gdf = None
+        if not samples_agg_df.empty and 'spWKT' in samples_agg_df.columns:
+            samples_gdf = create_geodataframe(samples_agg_df, 'spWKT')
+
+        map_obj = create_base_map(gdf_list=[facilities_gdf] + ([samples_gdf] if samples_gdf is not None else []), zoom=8)
         add_boundary_layers(map_obj, boundaries, query_region_code)
 
         # Add facility links and NAICS code links
@@ -283,17 +298,12 @@ def _render_map(facilities_df, samples_df, industry_display, boundaries, query_r
             popup_kwds={"max_width": 650, "parse_html": True},
             tooltip_kwds={"sticky": True, "parse_html": True})
 
-        # Add samples
-        if not samples_df.empty and 'spWKT' in samples_df.columns:
-            samples_gdf = create_geodataframe(samples_df, 'spWKT')
-            if samples_gdf is not None and not samples_gdf.empty:
-                samples_gdf = clean_unit_encoding(samples_gdf)
-                samples_gdf = samples_gdf.drop(columns=[c for c in ["results", "dates"] if c in samples_gdf.columns], errors="ignore")
-                sample_fields = [c for c in ["resultCount", "max", "datedresults", "Materials", "Type", "spName"] if c in samples_gdf.columns]
-                add_point_layer(map_obj, samples_gdf,
-                    name=f'<span style="color:DarkOrange;">PFAS Samples ({len(samples_gdf)})</span>',
-                    color='DarkOrange', popup_fields=sample_fields, radius=6,
-                    popup_kwds={'max_height': 450, 'max_width': 450})
+        # Add samples with rich popup
+        if samples_gdf is not None and not samples_gdf.empty:
+            add_point_layer(map_obj, samples_gdf,
+                name=f'<span style="color:DarkOrange;">PFAS Samples ({len(samples_gdf)})</span>',
+                color='DarkOrange', popup_fields=SAMPLE_POPUP_FIELDS, radius=6,
+                popup_kwds=SAMPLE_POPUP_KWDS)
 
         finalize_map(map_obj)
         render_folium_map(map_obj)

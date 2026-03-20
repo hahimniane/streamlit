@@ -35,6 +35,7 @@ from components.map_rendering import (
     create_base_map,
     add_boundary_layers,
     add_point_layer,
+    add_sample_layer,
     finalize_map,
     render_map_legend,
     render_folium_map,
@@ -300,19 +301,19 @@ def _render_map(facilities_df, samples_agg_df, industry_display, boundaries, que
             popup_kwds={"max_width": 650, "parse_html": True},
             tooltip_kwds={"sticky": True, "parse_html": True})
 
-        # Add samples with rich popup
+        # Add samples with rich popup (PuOr concentration palette)
         if samples_gdf is not None and not samples_gdf.empty:
-            add_point_layer(map_obj, samples_gdf,
+            add_sample_layer(map_obj, samples_gdf,
+                popup_fields=SAMPLE_POPUP_FIELDS, popup_kwds=SAMPLE_POPUP_KWDS,
                 name=f'<span style="color:{COLOR_SAMPLE};">PFAS Samples ({len(samples_gdf)})</span>',
-                color=COLOR_SAMPLE, popup_fields=SAMPLE_POPUP_FIELDS, radius=6,
-                popup_kwds=SAMPLE_POPUP_KWDS)
+                radius=6)
 
         finalize_map(map_obj)
         render_folium_map(map_obj)
         render_map_legend([
             "**Boundary** = Selected region",
             "**Red markers** = Facilities of selected industry type",
-            "**Orange markers** = PFAS sample points nearby"
+            "**Purple-to-orange markers** = PFAS sample points nearby (color = concentration level)"
         ])
 
     except Exception as e:

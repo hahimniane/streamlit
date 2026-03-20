@@ -34,7 +34,8 @@ from components.map_rendering import (
     add_naics_link_column,
     add_naics_url_column,
     create_base_map, add_boundary_layers, add_point_layer, add_line_layer,
-    add_grouped_point_layers, finalize_map, render_map_legend, render_folium_map
+    add_sample_layer, add_grouped_point_layers,
+    finalize_map, render_map_legend, render_folium_map,
 )
 from components.sample_popup import (
     aggregate_sample_popups,
@@ -320,25 +321,11 @@ def _render_map(facilities_df, streams_df, samples_agg_df, boundaries, context) 
     map_obj = create_base_map(gdf_list=[samples_gdf, facilities_gdf, streams_gdf], zoom=8)
     add_boundary_layers(map_obj, boundaries, context.region_code, warn_fn=st.warning)
 
-    # Add samples with rich popup
+    # Add samples with rich popup (PuOr concentration palette)
     if samples_gdf is not None and not samples_gdf.empty:
-        def _sample_style(feature):
-            props = (feature or {}).get("properties", {}) or {}
-            max_val = props.get("overall_max_result")
-            radius = 4
-            if max_val is not None:
-                try:
-                    v = float(max_val)
-                    if v > 0:
-                        radius = 4 if v < 40 else (v / 16 if v < 160 else 12)
-                except (ValueError, TypeError):
-                    pass
-            return {"radius": max(3, min(12, radius)), "opacity": 0.3, "color": "DimGray"}
-
-        samples_gdf.explore(m=map_obj, name=f'<span style="color:{COLOR_SAMPLE};">Samples</span>',
-            color=COLOR_SAMPLE, marker_kwds=dict(radius=6), marker_type="circle_marker",
-            popup=SAMPLE_POPUP_FIELDS, popup_kwds=SAMPLE_POPUP_KWDS,
-            style_kwds=dict(style_function=_sample_style))
+        add_sample_layer(map_obj, samples_gdf,
+            popup_fields=SAMPLE_POPUP_FIELDS, popup_kwds=SAMPLE_POPUP_KWDS,
+            radius=6)
 
     # Add streams
     if streams_gdf is not None and not streams_gdf.empty:
@@ -358,7 +345,7 @@ def _render_map(facilities_df, streams_df, samples_agg_df, boundaries, context) 
     render_folium_map(map_obj)
     render_map_legend([
         "**Boundary outline** = Selected region",
-        "**Orange circles** = PFAS samples downstream",
+        "**Purple-to-orange circles** = PFAS samples downstream (color = concentration level)",
         "**Blue lines** = Downstream flow paths",
         "**Red markers** = Facilities (by industry)"
     ])

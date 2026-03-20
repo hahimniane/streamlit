@@ -45,8 +45,19 @@ COLOR_AQUIFER = "#74a9cf"
 COLOR_FLOWLINE = "#2b8cbe"
 COLOR_WELL = "#045a8d"
 
-# Sample points — PuOr diverging (orange side for normal samples)
+# Sample points — PuOr diverging palette (purple=low, orange=high concentration)
 COLOR_SAMPLE = "#fdb863"
+SAMPLE_PUOR_PALETTE = [
+    "#542788",  # purple extreme  — non-detect / zero
+    "#8073ac",  #                 — 0 < c ≤ 4 ng/L
+    "#b2abd2",  #                 — 4 < c ≤ 20
+    "#d8daeb",  #                 — 20 < c ≤ 50
+    "#fee0b6",  # neutral center  — 50 < c ≤ 100
+    "#fdb863",  #                 — 100 < c ≤ 200
+    "#e08214",  #                 — 200 < c ≤ 400
+    "#b35806",  # orange extreme  — > 400
+]
+SAMPLE_CONC_BREAKS = [0, 4, 20, 50, 100, 200, 400]
 
 # Facilities — 9-class Reds (primary), 9-class Purples (secondary)
 FACILITY_COLORS_REDS = [
@@ -178,36 +189,78 @@ def add_naics_url_column(
     return result
 
 
-def downstream_sample_style(feature: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Marker style used by downstream analysis samples layer.
+def _concentration_to_color(value) -> str:
+    """Map a concentration value (ng/L) to a PuOr palette color."""
+    if value is None:
+        return SAMPLE_PUOR_PALETTE[0]
+    try:
+        v = float(value)
+    except (ValueError, TypeError):
+        return SAMPLE_PUOR_PALETTE[0]
+    if v <= 0:
+        return SAMPLE_PUOR_PALETTE[0]
+    for i, brk in enumerate(SAMPLE_CONC_BREAKS):
+        if v <= brk:
+            return SAMPLE_PUOR_PALETTE[i]
+    return SAMPLE_PUOR_PALETTE[-1]
 
-    Keeps current behavior:
-    - non-detects render black and small
-    - larger concentrations render larger gray markers
+
+def sample_point_style(feature: Dict[str, Any]) -> Dict[str, Any]:
+    """Shared marker style for sample points using the PuOr concentration palette.
+
+    Reads ``overall_max_result`` from feature properties to determine both
+    fill color (PuOr palette) and radius (scaled by concentration).
     """
     props = (feature or {}).get("properties", {}) or {}
-    max_val = props.get("Max")
-    is_nondetect = max_val in ["non-detect", "http://w3id.org/coso/v1/contaminoso#non-detect"]
-    if not is_nondetect:
-        try:
-            is_nondetect = float(max_val) == 0
-        except Exception:
-            pass
+    max_val = props.get("overall_max_result")
+
+    fill_color = _concentration_to_color(max_val)
 
     radius = 4
-    if not is_nondetect:
+    if max_val is not None:
         try:
             v = float(max_val)
-            radius = 4 if v < 40 else (v / 16 if v < 160 else 12)
-        except Exception:
+            if v > 0:
+                radius = 4 if v < 40 else (v / 16 if v < 160 else 12)
+        except (ValueError, TypeError):
             pass
 
     return {
         "radius": max(3, min(12, radius)),
+        "fillColor": fill_color,
+        "color": "DimGray",
+        "fillOpacity": 0.7,
         "opacity": 0.3,
-        "color": "Black" if is_nondetect else "DimGray",
     }
+
+
+def add_sample_layer(
+    map_obj: folium.Map,
+    gdf: gpd.GeoDataFrame,
+    popup_fields: List[str],
+    popup_kwds: Dict = None,
+    name: str = None,
+    radius: int = DEFAULT_POINT_RADIUS,
+) -> None:
+    """Add a sample-point layer colored by PuOr concentration palette.
+
+    This is the canonical way to render PFAS sample points on any analysis map.
+    Uses ``sample_point_style`` for per-feature color and size.
+    """
+    if gdf is None or gdf.empty:
+        return
+
+    label = name or f'<span style="color:{COLOR_SAMPLE};">Samples</span>'
+    gdf.explore(
+        m=map_obj,
+        name=label,
+        color=COLOR_SAMPLE,
+        marker_kwds=dict(radius=radius),
+        marker_type="circle_marker",
+        popup=popup_fields,
+        popup_kwds=popup_kwds or {},
+        style_kwds=dict(style_function=sample_point_style),
+    )
 
 
 def create_base_map(

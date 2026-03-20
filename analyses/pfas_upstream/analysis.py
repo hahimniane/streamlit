@@ -29,7 +29,8 @@ from components.map_rendering import (
     add_naics_link_column,
     add_naics_url_column,
     create_base_map, add_boundary_layers, add_point_layer,
-    add_line_layer, add_grouped_point_layers, finalize_map, render_map_legend, render_folium_map
+    add_line_layer, add_sample_layer, add_grouped_point_layers,
+    finalize_map, render_map_legend, render_folium_map,
 )
 from components.sample_popup import (
     aggregate_sample_popups,
@@ -380,9 +381,9 @@ def _render_map(samples_agg_df, facilities_df, upstream_s2_df, upstream_flowline
                        COLOR_FLOWLINE, weight=3, opacity=0.5)
 
     if samples_gdf is not None and not samples_gdf.empty:
-        add_point_layer(map_obj, samples_gdf, f'<span style="color:{COLOR_SAMPLE};">PFAS Samples</span>',
-                        COLOR_SAMPLE, popup_fields=SAMPLE_POPUP_FIELDS, radius=8,
-                        popup_kwds=SAMPLE_POPUP_KWDS)
+        add_sample_layer(map_obj, samples_gdf,
+            popup_fields=SAMPLE_POPUP_FIELDS, popup_kwds=SAMPLE_POPUP_KWDS,
+            radius=8)
 
     if facilities_gdf is not None and not facilities_gdf.empty:
         group_col = 'industryName'
@@ -403,7 +404,7 @@ def _render_map(samples_agg_df, facilities_df, upstream_s2_df, upstream_flowline
     finalize_map(map_obj)
     render_folium_map(map_obj)
     render_map_legend([
-        "**Orange circles** = PFAS sample locations",
+        "**Purple-to-orange circles** = PFAS sample locations (color = concentration level)",
         "**Blue lines** = Upstream flow paths",
         "**Red markers** = Upstream facilities (by industry)",
         "**Boundary outline** = Selected region"

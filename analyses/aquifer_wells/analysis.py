@@ -28,7 +28,7 @@ from components.parameter_display import (
 from components.result_display import render_step_results
 from components.map_rendering import (
     create_base_map, add_boundary_layers, add_point_layer,
-    finalize_map, render_map_legend, render_folium_map,
+    add_sample_layer, finalize_map, render_map_legend, render_folium_map,
     COLOR_AQUIFER, COLOR_WELL, COLOR_SAMPLE,
 )
 from components.execute_button import render_execute_button, check_required_fields
@@ -304,18 +304,18 @@ def _render_map(samples_agg_df, aquifers_df, wells_df, boundaries, context) -> N
             )
 
         if samplepts_gdf is not None and not samplepts_gdf.empty:
-            add_point_layer(
+            add_sample_layer(
                 map_obj, samplepts_gdf,
+                popup_fields=SAMPLE_POPUP_FIELDS, popup_kwds=SAMPLE_POPUP_KWDS,
                 name=f'<span style="color:{COLOR_SAMPLE};">Sample Points</span>',
-                color=COLOR_SAMPLE, popup_fields=SAMPLE_POPUP_FIELDS, radius=7,
-                popup_kwds=SAMPLE_POPUP_KWDS,
+                radius=7,
             )
 
         finalize_map(map_obj)
         render_folium_map(map_obj)
         render_map_legend([
             "**Striped areas** = Aquifers connected to sample points",
-            "**Orange circles** = Sample points",
+            "**Purple-to-orange circles** = Sample points (color = concentration level)",
             "**Dark blue circles** = Potentially connected water wells",
             "**Boundary outline** = Selected region",
         ])

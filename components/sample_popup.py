@@ -100,7 +100,7 @@ def _group_to_html(group: pd.DataFrame) -> pd.Series:
             uri_str = str(sample_uri_link)
             short = uri_str.split("#")[-1] if "#" in uri_str else uri_str.rsplit("/", 1)[-1]
             html_parts.append(
-                f"<b>Sample URI</b>: {html_mod.escape(short)}<br/>"
+                f"<b>Sample URI</b>: <a href='{uri_str}' target='_blank'>{html_mod.escape(short)}</a><br/>"
             )
         if not _is_empty(sample_id):
             html_parts.append(f"<b>Sample ID</b>: {html_mod.escape(str(sample_id))}<br/>")

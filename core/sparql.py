@@ -448,20 +448,33 @@ def build_query_debug_entry(
 
 
 def _log_filter_query(entry: dict[str, Any]) -> None:
-    """Append a filter/component query debug entry to session state."""
-    if "_filter_query_log" not in st.session_state:
-        st.session_state["_filter_query_log"] = []
-    st.session_state["_filter_query_log"].append(entry)
+    """Append a filter/component query debug entry to session state.
+
+    Silently skips logging when called from inside @st.cache_data or
+    other contexts where session state is unavailable.
+    """
+    try:
+        if "_filter_query_log" not in st.session_state:
+            st.session_state["_filter_query_log"] = []
+        st.session_state["_filter_query_log"].append(entry)
+    except Exception:
+        pass
 
 
 def get_filter_query_log() -> list[dict[str, Any]]:
     """Return the accumulated filter/component query debug entries."""
-    return list(st.session_state.get("_filter_query_log", []))
+    try:
+        return list(st.session_state.get("_filter_query_log", []))
+    except Exception:
+        return []
 
 
 def clear_filter_query_log() -> None:
     """Clear the filter/component query log."""
-    st.session_state["_filter_query_log"] = []
+    try:
+        st.session_state["_filter_query_log"] = []
+    except Exception:
+        pass
 
 
 def execute_sparql_query(

@@ -19,7 +19,7 @@ GROUP_COLS = ["samplePoint", "spWKT", "samplePointName"]
 SAMPLE_POPUP_FIELDS = ["samplePointName", "Max Result", "Samples"]
 
 # Lightweight popup fields — used when dataset is too large for full HTML popups
-SAMPLE_POPUP_FIELDS_LITE = ["samplePointName", "Max Substance", "Max Result (ng/L)", "Observations"]
+SAMPLE_POPUP_FIELDS_LITE = ["samplePointName", "Max Substance", "Max Result (ng/L)", "Observations", "Substance Summary"]
 
 SAMPLE_POPUP_KWDS = {"max_width": 900, "max_height": 500, "parse_html": True}
 
@@ -181,25 +181,61 @@ def aggregate_sample_popups(
 
 
 def _group_to_lite(group: pd.DataFrame) -> pd.Series:
-    """Lightweight aggregation: max result + count only, no HTML."""
-    max_val = -1.0
-    max_substance = None
+    """Lightweight aggregation with per-substance breakdown.
+
+    Produces a compact HTML table showing each detected substance with its
+    observation count and max concentration, plus an overall summary.
+    """
+    substance_stats: dict[str, dict] = {}
+    total_obs = len(group)
+    overall_max_val = -1.0
+    overall_max_substance = None
+
     for _, row in group.iterrows():
         r = row.get("result")
+        substance = str(row.get("substance", "Unknown"))
         if _is_empty(r) or r == "non-detect":
+            substance_stats.setdefault(substance, {"count": 0, "max": 0.0})
+            substance_stats[substance]["count"] += 1
             continue
         try:
             v = float(r)
-            if v > max_val:
-                max_val = v
-                max_substance = row.get("substance")
         except ValueError:
-            pass
+            continue
+        stats = substance_stats.setdefault(substance, {"count": 0, "max": 0.0})
+        stats["count"] += 1
+        if v > stats["max"]:
+            stats["max"] = v
+        if v > overall_max_val:
+            overall_max_val = v
+            overall_max_substance = substance
+
+    # Build compact HTML table for per-substance breakdown
+    html_parts: list[str] = []
+    html_parts.append(
+        "<table style='width:100%; border-collapse: collapse;'>"
+        "<thead><tr>"
+        "<th style='border: 1px solid #ddd; padding: 2px; text-align: left;'>Substance</th>"
+        "<th style='border: 1px solid #ddd; padding: 2px; text-align: right;'>Obs</th>"
+        "<th style='border: 1px solid #ddd; padding: 2px; text-align: right;'>Max (ng/L)</th>"
+        "</tr></thead><tbody>"
+    )
+    for subst, stats in sorted(substance_stats.items(), key=lambda x: x[1]["max"], reverse=True):
+        html_parts.append(
+            f"<tr>"
+            f"<td style='border: 1px solid #ddd; padding: 2px;'>{html_mod.escape(subst)}</td>"
+            f"<td style='border: 1px solid #ddd; padding: 2px; text-align: right;'>{stats['count']}</td>"
+            f"<td style='border: 1px solid #ddd; padding: 2px; text-align: right;'>{stats['max']:.2f}</td>"
+            f"</tr>"
+        )
+    html_parts.append("</tbody></table>")
+
     return pd.Series({
-        "Max Substance": max_substance if max_val != -1.0 else None,
-        "Max Result (ng/L)": round(max_val, 2) if max_val != -1.0 else None,
-        "Observations": len(group),
-        "overall_max_result": max_val if max_val != -1.0 else None,
+        "Max Substance": overall_max_substance if overall_max_val != -1.0 else None,
+        "Max Result (ng/L)": round(overall_max_val, 2) if overall_max_val != -1.0 else None,
+        "Observations": total_obs,
+        "Substance Summary": "".join(html_parts),
+        "overall_max_result": overall_max_val if overall_max_val != -1.0 else None,
     })
 
 

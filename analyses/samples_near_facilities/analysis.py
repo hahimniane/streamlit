@@ -42,7 +42,9 @@ from components.map_rendering import (
 )
 from components.sample_popup import (
     aggregate_sample_popups,
+    aggregate_sample_popups_lite,
     SAMPLE_POPUP_FIELDS,
+    SAMPLE_POPUP_FIELDS_LITE,
     SAMPLE_POPUP_KWDS,
 )
 from components.execute_button import render_execute_button
@@ -81,14 +83,20 @@ def main(context: AnalysisContext) -> None:
     selected_naics_code, selected_industry_display = render_sidebar_industry_selector(
         analysis_key=context.analysis_key,
         heading="### Industry Type",
-        caption="_Optional: leave empty to search all industries_",
+        caption="_Select an industry or a state (at minimum) to run the analysis_",
         allow_empty=True,
         empty_label="All Industries",
     )
 
     conc_filter = render_concentration_filter(context.analysis_key)
 
-    execute_clicked = render_execute_button(help_text="Execute the nearby facilities analysis")
+    has_filter = bool(context.selected_state_code or selected_naics_code)
+    if not has_filter:
+        st.sidebar.warning("Please select at least a **state** or an **industry type** to run this analysis.")
+    execute_clicked = render_execute_button(
+        help_text="Execute the nearby facilities analysis",
+        disabled=not has_filter,
+    )
 
     preview_request = build_eta_request(
         analysis_key=context.analysis_key,
@@ -174,10 +182,19 @@ def main(context: AnalysisContext) -> None:
                 step.info("Step 2: No PFAS samples found")
 
         # Aggregate raw samples for map popups
-        samples_agg_df = (
-            aggregate_sample_popups(samples_df)
-            if not samples_df.empty else pd.DataFrame()
-        )
+        # Use lightweight popups above 20K observations to keep the map responsive
+        _LITE_THRESHOLD = 20_000
+        use_lite = len(samples_df) > _LITE_THRESHOLD
+        if samples_df.empty:
+            samples_agg_df = pd.DataFrame()
+        elif use_lite:
+            st.info(
+                f"Large dataset ({len(samples_df):,} observations) — "
+                "using compact per-substance summary popups for map performance."
+            )
+            samples_agg_df = aggregate_sample_popups_lite(samples_df)
+        else:
+            samples_agg_df = aggregate_sample_popups(samples_df)
 
         record_executed_query_batch(
             request=run_request,
@@ -190,6 +207,7 @@ def main(context: AnalysisContext) -> None:
         state.set_results({
             "facilities_df": facilities_df, "samples_df": samples_df,
             "samples_agg_df": samples_agg_df,
+            "use_lite_popups": use_lite,
             "industry_display": selected_industry_display, "boundaries": boundaries,
             "params_data": [
                 build_industry_params(selected_industry_display),
@@ -257,7 +275,8 @@ def main(context: AnalysisContext) -> None:
             )
 
         # Map
-        _render_map(facilities_df, samples_agg_df, industry_display, boundaries, query_region_code, context)
+        use_lite = results.get("use_lite_popups", False)
+        _render_map(facilities_df, samples_agg_df, industry_display, boundaries, query_region_code, context, use_lite)
 
         if facilities_df.empty and samples_df.empty:
             st.warning("No results found. Try a different industry type or region.")
@@ -265,7 +284,7 @@ def main(context: AnalysisContext) -> None:
         st.info("Select parameters in the sidebar and click 'Execute Query' to run the analysis")
 
 
-def _render_map(facilities_df, samples_agg_df, industry_display, boundaries, query_region_code, context) -> None:
+def _render_map(facilities_df, samples_agg_df, industry_display, boundaries, query_region_code, context, use_lite: bool = False) -> None:
     """Render the interactive map."""
     if facilities_df.empty or 'facWKT' not in facilities_df.columns:
         if not facilities_df.empty:
@@ -301,10 +320,12 @@ def _render_map(facilities_df, samples_agg_df, industry_display, boundaries, que
             popup_kwds={"max_width": 650, "parse_html": True},
             tooltip_kwds={"sticky": True, "parse_html": True})
 
-        # Add samples with rich popup (PuOr concentration palette)
+        # Add samples with popup (PuOr concentration palette)
         if samples_gdf is not None and not samples_gdf.empty:
+            popup_fields = SAMPLE_POPUP_FIELDS_LITE if use_lite else SAMPLE_POPUP_FIELDS
+            popup_kwds = SAMPLE_POPUP_KWDS if not use_lite else {"max_width": 500, "max_height": 400, "parse_html": True}
             add_sample_layer(map_obj, samples_gdf,
-                popup_fields=SAMPLE_POPUP_FIELDS, popup_kwds=SAMPLE_POPUP_KWDS,
+                popup_fields=popup_fields, popup_kwds=popup_kwds,
                 name=f'<span style="color:{COLOR_SAMPLE};">PFAS Samples ({len(samples_gdf)})</span>',
                 radius=6)
 

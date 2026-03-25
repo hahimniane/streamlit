@@ -293,7 +293,7 @@ def _render_map(facilities_df, samples_agg_df, industry_display, boundaries, que
         if "industryCode" in facilities_gdf.columns:
             facilities_gdf = add_naics_link_column(facilities_gdf)
 
-        facility_color = FACILITY_COLORS_REDS[6]  # #cb181d — strong red
+        facility_color = FACILITY_COLORS_REDS[3]  # #cb181d — strong red
         facility_fields = [c for c in ["Facility ID", "facilityName", "industryName", "NAICS Code"] if c in facilities_gdf.columns]
         add_point_layer(map_obj, facilities_gdf,
             name=f'<span style="color:{facility_color};">{industry_display} ({len(facilities_gdf)})</span>',

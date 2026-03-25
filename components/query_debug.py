@@ -6,6 +6,8 @@ from __future__ import annotations
 from typing import Any, Iterable, Mapping
 import streamlit as st
 
+from core.sparql import get_filter_query_log
+
 
 def _build_metadata_line(query_info: Mapping[str, Any]) -> str:
     """Build a compact metadata line for one executed query."""
@@ -37,6 +39,32 @@ def _build_metadata_line(query_info: Mapping[str, Any]) -> str:
     return " | ".join(parts)
 
 
+def _render_query_list(
+    queries: list[Mapping[str, Any]],
+    start_index: int = 1,
+) -> None:
+    """Render a list of query debug entries."""
+    for index, query_info in enumerate(queries, start=start_index):
+        label = query_info.get("label") or f"Query {index}"
+        st.markdown(f"**{label}**")
+
+        metadata = _build_metadata_line(query_info)
+        if metadata:
+            st.caption(metadata)
+
+        query_text = str(query_info.get("query") or "").strip()
+        if query_text:
+            st.code(query_text, language="sparql")
+        else:
+            st.info("No query text captured for this step.")
+
+        error_message = query_info.get("error") or query_info.get("exception")
+        if error_message:
+            st.error(f"Error: {error_message}")
+
+        st.markdown("---")
+
+
 def render_executed_queries(
     executed_queries: Iterable[Mapping[str, Any]] | None,
     title: str = "Debug: Executed Queries",
@@ -44,35 +72,28 @@ def render_executed_queries(
     """
     Render executed SPARQL queries with copyable code blocks.
 
+    Shows two sections:
+    1. Analysis queries (passed explicitly via executed_queries)
+    2. Filter/component queries (logged automatically by execute_sparql_query)
+
     Args:
         executed_queries: Iterable of query metadata dicts. Each item may include
             label, endpoint, timeout_sec, response_status, row_count, error, query.
         title: Expander title.
     """
-    queries = list(executed_queries or [])
-    if not queries:
+    analysis_queries = list(executed_queries or [])
+    filter_queries = get_filter_query_log()
+
+    if not analysis_queries and not filter_queries:
         return
 
     with st.expander(title):
         st.caption("Exact query text sent to the endpoint. Use the copy button in each code block.")
 
-        for index, query_info in enumerate(queries, start=1):
-            label = query_info.get("label") or f"Query {index}"
-            st.markdown(f"**{label}**")
+        if analysis_queries:
+            st.markdown("### Analysis Queries")
+            _render_query_list(analysis_queries)
 
-            metadata = _build_metadata_line(query_info)
-            if metadata:
-                st.caption(metadata)
-
-            query_text = str(query_info.get("query") or "").strip()
-            if query_text:
-                st.code(query_text, language="sparql")
-            else:
-                st.info("No query text captured for this step.")
-
-            error_message = query_info.get("error") or query_info.get("exception")
-            if error_message:
-                st.error(f"Error: {error_message}")
-
-            if index < len(queries):
-                st.markdown("---")
+        if filter_queries:
+            st.markdown("### Filter / Component Queries")
+            _render_query_list(filter_queries)

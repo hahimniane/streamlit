@@ -9,7 +9,6 @@ from dataclasses import dataclass
 from typing import Callable, Literal, Optional, Tuple
 import streamlit as st
 import pandas as pd
-import requests
 
 from core.sparql import ENDPOINT_URLS, parse_sparql_results, execute_sparql_query
 
@@ -103,7 +102,10 @@ SELECT DISTINCT ?ar1 WHERE {
 FILTER(STRSTARTS(STR(?ar1), "http://stko-kwg.geog.ucsb.edu/lod/resource/administrativeRegion.USA.")).
 }
 """
-    results = execute_sparql_query(ENDPOINT_URLS["federation"], query, timeout=300)
+    results = execute_sparql_query(
+        ENDPOINT_URLS["federation"], query, timeout=300,
+        label="Filter: Available States",
+    )
     if not results:
         return pd.DataFrame(columns=['ar1', 'fips_code'])
 
@@ -155,7 +157,10 @@ FILTER(STRSTARTS(STR(?ar2), "http://stko-kwg.geog.ucsb.edu")).
 }}
 """
 
-    results = execute_sparql_query(ENDPOINT_URLS["federation"], query, timeout=300)
+    results = execute_sparql_query(
+        ENDPOINT_URLS["federation"], query, timeout=300,
+        label=f"Filter: Available Counties (state {state_code_str})",
+    )
     if not results:
         return pd.DataFrame(columns=['ar2', 'fips_code'])
 
@@ -204,7 +209,10 @@ SELECT DISTINCT ?ar3 WHERE {{
 }}
 """
 
-    results = execute_sparql_query(ENDPOINT_URLS["federation"], query, timeout=300)
+    results = execute_sparql_query(
+        ENDPOINT_URLS["federation"], query, timeout=300,
+        label=f"Filter: Available Subdivisions (county {county_code_str})",
+    )
     if not results:
         return pd.DataFrame(columns=['ar3', 'fips_code'])
 
@@ -251,27 +259,15 @@ SELECT * WHERE {{
 }}
 """
 
-    try:
-        response = requests.post(
-            ENDPOINT_URLS["federation"],
-            data={"query": query},
-            headers={
-                "Accept": "application/sparql-results+json",
-                "Content-Type": "application/x-www-form-urlencoded"
-            },
-            timeout=60
-        )
-
-        if response.status_code == 200:
-            results = response.json()
-            df = parse_sparql_results(results)
-            if not df.empty:
-                return df
+    results = execute_sparql_query(
+        ENDPOINT_URLS["federation"], query, timeout=60,
+        label=f"Filter: Region Boundary ({region_code})",
+    )
+    if not results:
         return None
 
-    except Exception as e:
-        print(f"Error querying boundary: {str(e)}")
-        return None
+    df = parse_sparql_results(results)
+    return df if not df.empty else None
 
 
 def add_region_boundary_layers(

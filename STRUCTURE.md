@@ -132,6 +132,115 @@ Domain-specific filters combining UI widgets and data queries:
 Generic UI components not tied to a specific analysis:
 - `start_page.py` - Landing page with app description
 
+## Map Color System
+
+All map colors are defined in `components/map_rendering.py` and derive from
+[ColorBrewer2](https://colorbrewer2.org/) palettes, following EPA/USGS
+cartographic standards. The authoritative reference is the
+[Design System wiki](https://github.com/SAWGraph/explorer-app/wiki/Design-System-References).
+
+### Palettes at a Glance
+
+| Category | Palette | Constants | Purpose |
+|---|---|---|---|
+| Water features | PuBu sequential (6-class) | `COLOR_WATERSHED`, `COLOR_AQUIFER`, `COLOR_FLOWLINE`, `COLOR_WELL` | Watersheds, aquifers, flowlines, wells |
+| Sample points | PuOr diverging (8-class) | `COLOR_SAMPLE`, `SAMPLE_PUOR_PALETTE`, `SAMPLE_CONC_BREAKS` | PFAS concentration gradient (purple = low, orange = high) |
+| Facilities (primary) | Reds sequential (9-class) | `FACILITY_COLORS_REDS` | Industry layers when PFAS signatures are present |
+| Facilities (secondary) | Purples sequential (9-class) | `FACILITY_COLORS_PURPLES` | Industry layers when PFAS signatures are absent |
+
+### Water Features — PuBu Sequential
+
+Fixed single-color assignments:
+
+| Constant | Hex | Use |
+|---|---|---|
+| `COLOR_WATERSHED` | `#d0d1e6` | Watershed boundaries |
+| `COLOR_AQUIFER` | `#74a9cf` | Aquifer outlines (striped pattern) |
+| `COLOR_FLOWLINE` | `#2b8cbe` | Stream / river flowlines |
+| `COLOR_WELL` | `#045a8d` | Well points |
+
+### Sample Points — PuOr Diverging
+
+Each sample point is colored by its `overall_max_result` concentration (ng/L).
+The mapping is handled by `_concentration_to_color()` and `sample_point_style()`:
+
+| Index | Hex | Concentration range |
+|---|---|---|
+| 0 | `#542788` | Non-detect / zero |
+| 1 | `#8073ac` | 0 < c ≤ 4 ng/L |
+| 2 | `#b2abd2` | 4 < c ≤ 20 |
+| 3 | `#d8daeb` | 20 < c ≤ 50 |
+| 4 | `#fee0b6` | 50 < c ≤ 100 |
+| 5 | `#fdb863` | 100 < c ≤ 200 |
+| 6 | `#e08214` | 200 < c ≤ 400 |
+| 7 | `#b35806` | > 400 |
+
+The break points are stored in `SAMPLE_CONC_BREAKS = [0, 4, 20, 50, 100, 200, 400]`.
+
+Marker radius also scales with concentration (see `sample_point_style()`).
+Use `add_sample_layer()` — never `add_point_layer()` — for sample points so
+the PuOr styling is applied automatically.
+
+### Facilities — Reds / Purples Sequential
+
+When facilities are rendered as grouped layers (one layer per industry type via
+`add_grouped_point_layers()`), colors cycle through `LAYER_COLORS`.
+
+The full 9-class ColorBrewer palettes are stored as `_FACILITY_COLORS_REDS_FULL`
+and `_FACILITY_COLORS_PURPLES_FULL`. The **exported constants**
+`FACILITY_COLORS_REDS` and `FACILITY_COLORS_PURPLES` skip the 3 lightest
+shades (indices 0–2) because those are nearly white and invisible as both
+map markers and layer-control text. The visible subsets are:
+
+**Reds (primary — `FACILITY_COLORS_REDS` / `LAYER_COLORS`):**
+
+| Hex | Approx. description |
+|---|---|
+| `#fc9272` | Salmon |
+| `#fb6a4a` | Coral |
+| `#ef3b2c` | Red |
+| `#cb181d` | Crimson |
+| `#a50f15` | Dark red |
+| `#67000d` | Maroon |
+
+**Purples (secondary — `FACILITY_COLORS_PURPLES`):**
+
+| Hex | Approx. description |
+|---|---|
+| `#bcbddc` | Lavender |
+| `#9e9ac8` | Medium purple |
+| `#807dba` | Purple |
+| `#6a51a3` | Dark purple |
+| `#54278f` | Deep purple |
+| `#3f007d` | Very dark purple |
+
+Colors wrap around via modulo when there are more groups than colors.
+
+### Marker Sizing
+
+| Constant | Value | Use |
+|---|---|---|
+| `DEFAULT_POINT_RADIUS` | 6 | Generic point layers |
+| `FACILITY_MARKER_RADIUS` | 8 | Grouped facility layers |
+| `OTHER_FACILITY_MARKER_RADIUS` | 6 | Secondary facility layers |
+| `PFAS_FACILITY_MARKER_RADIUS` | 7 | PFAS-specific facility layers |
+
+### How to Use in an Analysis
+
+```python
+# Sample points (auto-colored by concentration)
+add_sample_layer(map_obj, samples_gdf, popup_fields=[...])
+
+# Single-color point layer
+add_point_layer(map_obj, gdf, name='...', color='DarkOrange', ...)
+
+# Grouped facility layers (auto-cycles through LAYER_COLORS)
+add_grouped_point_layers(map_obj, gdf, group_column='industryName', ...)
+
+# Flowlines
+add_line_layer(map_obj, gdf, name='...', color=COLOR_FLOWLINE, ...)
+```
+
 ## Key Design Principles
 
 1. **Separation of Concerns**: Queries are separated from UI logic

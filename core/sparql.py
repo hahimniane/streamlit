@@ -11,6 +11,7 @@ import time
 import pandas as pd
 import rdflib
 import requests
+import streamlit as st
 from SPARQLWrapper import SPARQLWrapper2, JSON, POST, DIGEST
 
 
@@ -446,46 +447,107 @@ def build_query_debug_entry(
     }
 
 
+def _log_filter_query(entry: dict[str, Any]) -> None:
+    """Append a filter/component query debug entry to session state."""
+    if "_filter_query_log" not in st.session_state:
+        st.session_state["_filter_query_log"] = []
+    st.session_state["_filter_query_log"].append(entry)
+
+
+def get_filter_query_log() -> list[dict[str, Any]]:
+    """Return the accumulated filter/component query debug entries."""
+    return list(st.session_state.get("_filter_query_log", []))
+
+
+def clear_filter_query_log() -> None:
+    """Clear the filter/component query log."""
+    st.session_state["_filter_query_log"] = []
+
+
 def execute_sparql_query(
     endpoint: str,
     query: str,
     method: str = 'POST',
-    timeout: Optional[int] = None
+    timeout: Optional[int] = None,
+    label: Optional[str] = None,
 ) -> Optional[dict]:
     """
     Execute a SPARQL query and return JSON results.
-    
+
     This is THE canonical function for executing SPARQL queries via HTTP.
-    
+
     Args:
         endpoint: Full URL of the SPARQL endpoint, or key from ENDPOINT_URLS
         query: SPARQL query string
         method: HTTP method ('POST' or 'GET')
         timeout: Request timeout in seconds (None = no timeout)
-    
+        label: Optional label for filter query log (e.g. "Available Counties")
+
     Returns:
         JSON response dict, or None if query failed
     """
     # Allow passing endpoint name instead of full URL
-    if endpoint in ENDPOINT_URLS:
-        endpoint = ENDPOINT_URLS[endpoint]
-    
+    resolved_endpoint = ENDPOINT_URLS.get(endpoint, endpoint)
+
     headers = {
         'Accept': 'application/sparql-results+json',
         'Content-Type': 'application/x-www-form-urlencoded'
     }
-    
+
+    started = time.perf_counter()
+    status = None
+    error_msg = None
+
     try:
         if method.upper() == 'POST':
-            response = requests.post(endpoint, data={'query': query}, headers=headers, timeout=timeout)
+            response = requests.post(resolved_endpoint, data={'query': query}, headers=headers, timeout=timeout)
         else:
-            response = requests.get(endpoint, params={'query': query}, headers=headers, timeout=timeout)
-        
+            response = requests.get(resolved_endpoint, params={'query': query}, headers=headers, timeout=timeout)
+
+        status = response.status_code
         response.raise_for_status()
-        return response.json()
+        result = response.json()
+        row_count = len(result.get("results", {}).get("bindings", []))
     except Exception as e:
-        print(f"SPARQL query error: {e}")
-        return None
+        error_msg = str(e)
+        result = None
+        row_count = 0
+
+    elapsed_ms = (time.perf_counter() - started) * 1000.0
+
+    _log_filter_query({
+        "label": label or _infer_filter_label(query),
+        "endpoint": resolved_endpoint,
+        "query": query,
+        "timeout_sec": timeout,
+        "response_status": status,
+        "elapsed_ms": elapsed_ms,
+        "row_count": row_count,
+        "error": error_msg,
+    })
+
+    if error_msg:
+        print(f"SPARQL query error: {error_msg}")
+
+    return result
+
+
+def _infer_filter_label(query: str) -> str:
+    """Guess a short label from the query text for the debug panel."""
+    q = query.lower()
+    if "administrativeregion_1" in q:
+        return "Filter: Available States"
+    if "administrativeregion_2" in q and "administrativeregion_3" in q:
+        return "Filter: Available Counties"
+    if "subdivision" in q or ("administrativeregion_3" in q and "administrativeregion_2" not in q):
+        return "Filter: Available Subdivisions"
+    if "chemicalentity" in q or "ofsubstance" in q:
+        return "Filter: Available Substances"
+    if "samplematerialtype" in q or "sampleofmaterialtype" in q:
+        return "Filter: Available Material Types"
+    if "asWKT" in query or "aswkt" in q:
+        return "Filter: Region Boundary"
+    return "Filter: Component Query"
 
 
 def test_connection(endpoint_name: str = 'sawgraph') -> tuple[bool, str, Optional[pd.DataFrame]]:

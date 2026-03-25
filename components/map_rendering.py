@@ -60,16 +60,22 @@ SAMPLE_PUOR_PALETTE = [
 SAMPLE_CONC_BREAKS = [0, 4, 20, 50, 100, 200, 400]
 
 # Facilities — 9-class Reds (primary), 9-class Purples (secondary)
-FACILITY_COLORS_REDS = [
+# Full palettes kept for reference; the _VISIBLE slices skip the lightest
+# shades that are invisible as map markers and layer-control text.
+_FACILITY_COLORS_REDS_FULL = [
     "#fff5f0", "#fee0d2", "#fcbba1", "#fc9272", "#fb6a4a",
     "#ef3b2c", "#cb181d", "#a50f15", "#67000d",
 ]
-FACILITY_COLORS_PURPLES = [
+_FACILITY_COLORS_PURPLES_FULL = [
     "#fcfbfd", "#efedf5", "#dadaeb", "#bcbddc", "#9e9ac8",
     "#807dba", "#6a51a3", "#54278f", "#3f007d",
 ]
 
-# Default color palette for grouped facility/industry layers (9-class Reds)
+# Visible subsets — drop the 3 lightest shades so every layer is legible
+FACILITY_COLORS_REDS = _FACILITY_COLORS_REDS_FULL[3:]      # #fc9272 … #67000d  (6 colors)
+FACILITY_COLORS_PURPLES = _FACILITY_COLORS_PURPLES_FULL[3:]  # #bcbddc … #3f007d  (6 colors)
+
+# Default color palette for grouped facility/industry layers (visible Reds)
 LAYER_COLORS = FACILITY_COLORS_REDS
 
 # Shared marker sizing defaults.

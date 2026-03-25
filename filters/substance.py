@@ -69,7 +69,10 @@ SELECT ?substance (SAMPLE(?_label) AS ?label) (SAMPLE(?_short_label) AS ?short_l
 }} GROUP BY ?substance
 """
 
-    results = execute_sparql_query(ENDPOINT_URLS["federation"], query)
+    results = execute_sparql_query(
+        ENDPOINT_URLS["federation"], query,
+        label=f"Filter: Available Substances (region {region_code})",
+    )
     if not results:
         return pd.DataFrame(columns=["substance", "label", "short_label", "num", "display_name"])
 

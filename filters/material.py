@@ -70,7 +70,10 @@ SELECT DISTINCT ?matType ?matTypeLabel WHERE {{
 }}
 """
 
-    results = execute_sparql_query(ENDPOINT_URLS["federation"], query)
+    results = execute_sparql_query(
+        ENDPOINT_URLS["federation"], query,
+        label=f"Filter: Available Material Types (region {region_code})",
+    )
     if not results:
         return pd.DataFrame(columns=["matType", "display_name"])
 

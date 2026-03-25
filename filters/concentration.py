@@ -280,5 +280,8 @@ SELECT (MAX(?numericValue) as ?max) WHERE {{
 }}
 """
 
-    results = execute_sparql_query(ENDPOINT_URLS["federation"], query, timeout=300)
+    results = execute_sparql_query(
+        ENDPOINT_URLS["federation"], query, timeout=300,
+        label=f"Filter: Max Concentration (region {region_code})",
+    )
     return _parse_max_value(results)

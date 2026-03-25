@@ -39,7 +39,9 @@ from components.map_rendering import (
 )
 from components.sample_popup import (
     aggregate_sample_popups,
+    aggregate_sample_popups_lite,
     SAMPLE_POPUP_FIELDS,
+    SAMPLE_POPUP_FIELDS_LITE,
     SAMPLE_POPUP_KWDS,
 )
 from components.execute_button import render_execute_button, check_required_fields
@@ -203,7 +205,18 @@ def main(context: AnalysisContext) -> None:
                     step.info("Step 3: No downstream samples found")
 
             # Aggregate raw samples for map popups
-            samples_agg_df = aggregate_sample_popups(samples_df) if not samples_df.empty else pd.DataFrame()
+            _LITE_THRESHOLD = 20_000
+            use_lite = len(samples_df) > _LITE_THRESHOLD
+            if samples_df.empty:
+                samples_agg_df = pd.DataFrame()
+            elif use_lite:
+                st.info(
+                    f"Large dataset ({len(samples_df):,} observations) — "
+                    "using compact per-substance summary popups for map performance."
+                )
+                samples_agg_df = aggregate_sample_popups_lite(samples_df)
+            else:
+                samples_agg_df = aggregate_sample_popups(samples_df)
 
             record_executed_query_batch(
                 request=run_request,
@@ -214,6 +227,7 @@ def main(context: AnalysisContext) -> None:
             state.set_results({
                 "facilities_df": facilities_df, "streams_df": streams_df,
                 "samples_df": samples_df, "samples_agg_df": samples_agg_df,
+                "use_lite_popups": use_lite,
                 "boundaries": boundaries, "params_data": params_data,
                 "query_region_code": context.region_code, "selected_industry": selected_industry_display,
                 "executed_queries": executed_queries,
@@ -291,12 +305,13 @@ def main(context: AnalysisContext) -> None:
                 download_key=f"download_{context.analysis_key}_samples")
 
         # Map
-        _render_map(facilities_df, streams_df, samples_agg_df, boundaries, context)
+        use_lite = results.get("use_lite_popups", False)
+        _render_map(facilities_df, streams_df, samples_agg_df, boundaries, context, use_lite)
     else:
         st.info("Select an industry type in the sidebar, then click 'Execute Query' to run the analysis")
 
 
-def _render_map(facilities_df, streams_df, samples_agg_df, boundaries, context) -> None:
+def _render_map(facilities_df, streams_df, samples_agg_df, boundaries, context, use_lite: bool = False) -> None:
     """Render the interactive map."""
     has_facilities = not facilities_df.empty and 'facWKT' in facilities_df.columns
     has_streams = not streams_df.empty and 'dsflWKT' in streams_df.columns
@@ -321,10 +336,12 @@ def _render_map(facilities_df, streams_df, samples_agg_df, boundaries, context) 
     map_obj = create_base_map(gdf_list=[samples_gdf, facilities_gdf, streams_gdf], zoom=8)
     add_boundary_layers(map_obj, boundaries, context.region_code, warn_fn=st.warning)
 
-    # Add samples with rich popup (PuOr concentration palette)
+    # Add samples with popup (PuOr concentration palette)
     if samples_gdf is not None and not samples_gdf.empty:
+        popup_fields = SAMPLE_POPUP_FIELDS_LITE if use_lite else SAMPLE_POPUP_FIELDS
+        popup_kwds = {"max_width": 500, "max_height": 400, "parse_html": True} if use_lite else SAMPLE_POPUP_KWDS
         add_sample_layer(map_obj, samples_gdf,
-            popup_fields=SAMPLE_POPUP_FIELDS, popup_kwds=SAMPLE_POPUP_KWDS,
+            popup_fields=popup_fields, popup_kwds=popup_kwds,
             radius=6)
 
     # Add streams

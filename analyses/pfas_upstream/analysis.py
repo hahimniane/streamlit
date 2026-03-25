@@ -34,7 +34,9 @@ from components.map_rendering import (
 )
 from components.sample_popup import (
     aggregate_sample_popups,
+    aggregate_sample_popups_lite,
     SAMPLE_POPUP_FIELDS,
+    SAMPLE_POPUP_FIELDS_LITE,
     SAMPLE_POPUP_KWDS,
 )
 from components.execute_button import render_execute_button
@@ -231,16 +233,25 @@ def main(context: AnalysisContext) -> None:
             )
 
             # Aggregate raw samples for map popups
-            samples_agg_df = (
-                aggregate_sample_popups(samples_df)
-                if not samples_df.empty else pd.DataFrame()
-            )
+            _LITE_THRESHOLD = 20_000
+            use_lite = len(samples_df) > _LITE_THRESHOLD
+            if samples_df.empty:
+                samples_agg_df = pd.DataFrame()
+            elif use_lite:
+                st.info(
+                    f"Large dataset ({len(samples_df):,} observations) — "
+                    "using compact per-substance summary popups for map performance."
+                )
+                samples_agg_df = aggregate_sample_popups_lite(samples_df)
+            else:
+                samples_agg_df = aggregate_sample_popups(samples_df)
 
             state.set('executed_queries', executed_queries)
             # Store results
             state.set_results({
                 'samples_df': samples_df,
                 'samples_agg_df': samples_agg_df,
+                'use_lite_popups': use_lite,
                 'upstream_s2_df': upstream_s2_df,
                 'upstream_flowlines_df': upstream_flowlines_df,
                 'facilities_df': facilities_df,
@@ -320,7 +331,8 @@ def main(context: AnalysisContext) -> None:
                 _render_industry_breakdown(facilities_df)
 
         # Map
-        _render_map(samples_agg_df, facilities_df, upstream_s2_df, upstream_flowlines_df, boundaries, context)
+        use_lite = results.get("use_lite_popups", False)
+        _render_map(samples_agg_df, facilities_df, upstream_s2_df, upstream_flowlines_df, boundaries, context, use_lite)
 
 
 def _render_industry_breakdown(facilities_df: pd.DataFrame) -> None:
@@ -349,7 +361,7 @@ def _render_industry_breakdown(facilities_df: pd.DataFrame) -> None:
                      use_container_width=True, hide_index=True)
 
 
-def _render_map(samples_agg_df, facilities_df, upstream_s2_df, upstream_flowlines_df, boundaries, context) -> None:
+def _render_map(samples_agg_df, facilities_df, upstream_s2_df, upstream_flowlines_df, boundaries, context, use_lite: bool = False) -> None:
     """Render the interactive map."""
     has_samples = not samples_agg_df.empty and 'spWKT' in samples_agg_df.columns
     has_facilities = not facilities_df.empty and 'facWKT' in facilities_df.columns
@@ -381,8 +393,10 @@ def _render_map(samples_agg_df, facilities_df, upstream_s2_df, upstream_flowline
                        COLOR_FLOWLINE, weight=3, opacity=0.5)
 
     if samples_gdf is not None and not samples_gdf.empty:
+        popup_fields = SAMPLE_POPUP_FIELDS_LITE if use_lite else SAMPLE_POPUP_FIELDS
+        popup_kwds = {"max_width": 500, "max_height": 400, "parse_html": True} if use_lite else SAMPLE_POPUP_KWDS
         add_sample_layer(map_obj, samples_gdf,
-            popup_fields=SAMPLE_POPUP_FIELDS, popup_kwds=SAMPLE_POPUP_KWDS,
+            popup_fields=popup_fields, popup_kwds=popup_kwds,
             radius=8)
 
     if facilities_gdf is not None and not facilities_gdf.empty:

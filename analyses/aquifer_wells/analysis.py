@@ -38,7 +38,9 @@ from components.query_debug import render_executed_queries
 from components.eta_display import render_simple_eta
 from components.sample_popup import (
     aggregate_sample_popups,
+    aggregate_sample_popups_lite,
     SAMPLE_POPUP_FIELDS,
+    SAMPLE_POPUP_FIELDS_LITE,
     SAMPLE_POPUP_KWDS,
 )
 from core.runtime_eta import (
@@ -177,7 +179,18 @@ def main(context: AnalysisContext) -> None:
                 step.warning("Step 3: No connected wells found")
 
         # Aggregate raw samples for map popups
-        samples_agg_df = aggregate_sample_popups(samples_raw_df) if not samples_raw_df.empty else pd.DataFrame()
+        _LITE_THRESHOLD = 20_000
+        use_lite = len(samples_raw_df) > _LITE_THRESHOLD
+        if samples_raw_df.empty:
+            samples_agg_df = pd.DataFrame()
+        elif use_lite:
+            st.info(
+                f"Large dataset ({len(samples_raw_df):,} observations) — "
+                "using compact per-substance summary popups for map performance."
+            )
+            samples_agg_df = aggregate_sample_popups_lite(samples_raw_df)
+        else:
+            samples_agg_df = aggregate_sample_popups(samples_raw_df)
 
         boundaries = fetch_boundaries(context.selected_state_code, context.selected_county_code)
 
@@ -190,6 +203,7 @@ def main(context: AnalysisContext) -> None:
         state.set_results({
             "samples_raw_df": samples_raw_df,
             "samples_agg_df": samples_agg_df,
+            "use_lite_popups": use_lite,
             "aquifers_df": aquifers_df,
             "wells_df": wells_df,
             "boundaries": boundaries,
@@ -253,13 +267,14 @@ def main(context: AnalysisContext) -> None:
                 download_key=f"download_{context.analysis_key}_wells",
             )
 
-        _render_map(samples_agg_df, aquifers_df, wells_df, boundaries, context)
+        use_lite = results.get("use_lite_popups", False)
+        _render_map(samples_agg_df, aquifers_df, wells_df, boundaries, context, use_lite)
 
     else:
         st.info("Select parameters in the sidebar and click 'Execute Query' to run the analysis.")
 
 
-def _render_map(samples_agg_df, aquifers_df, wells_df, boundaries, context) -> None:
+def _render_map(samples_agg_df, aquifers_df, wells_df, boundaries, context, use_lite: bool = False) -> None:
     """Render the interactive 3-layer map: aquifer polygons, sample points, wells."""
     has_samples = not samples_agg_df.empty and "spWKT" in samples_agg_df.columns
     has_aquifers = not aquifers_df.empty and "aquiferwkt" in aquifers_df.columns
@@ -304,9 +319,11 @@ def _render_map(samples_agg_df, aquifers_df, wells_df, boundaries, context) -> N
             )
 
         if samplepts_gdf is not None and not samplepts_gdf.empty:
+            popup_fields = SAMPLE_POPUP_FIELDS_LITE if use_lite else SAMPLE_POPUP_FIELDS
+            popup_kwds = {"max_width": 500, "max_height": 400, "parse_html": True} if use_lite else SAMPLE_POPUP_KWDS
             add_sample_layer(
                 map_obj, samplepts_gdf,
-                popup_fields=SAMPLE_POPUP_FIELDS, popup_kwds=SAMPLE_POPUP_KWDS,
+                popup_fields=popup_fields, popup_kwds=popup_kwds,
                 name=f'<span style="color:{COLOR_SAMPLE};">Sample Points</span>',
                 radius=7,
             )

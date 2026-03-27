@@ -17,13 +17,27 @@ from filters.region import add_region_boundary_layers
 # Default popup CSS applied to all maps
 POPUP_CSS = """
 <style>
-.leaflet-popup { max-width: 920px !important; }
-.leaflet-popup-content-wrapper { max-width: 920px !important; }
-.leaflet-popup-content { min-width: 420px !important; max-width: 900px !important; width: auto !important; }
-.leaflet-popup-content table { width: 100% !important; table-layout: auto; }
-.leaflet-popup-content td, .leaflet-popup-content th {
+.leaflet-popup { max-width: 90vw !important; }
+.leaflet-popup-content-wrapper { max-width: 90vw !important; }
+.leaflet-popup-content {
+  min-width: 300px !important;
+  max-width: 80vw !important;
+  width: auto !important;
+  max-height: 500px;
+  overflow-y: auto;
+  overflow-x: auto;
+}
+.leaflet-popup-content table {
+  width: max-content !important;
+  table-layout: auto;
+}
+.leaflet-popup-content td {
   overflow-wrap: anywhere;
   white-space: normal !important;
+}
+.leaflet-popup-content th {
+  white-space: nowrap !important;
+  overflow-wrap: normal;
 }
 .leaflet-popup-content a, .leaflet-tooltip a {
   display: inline-block;

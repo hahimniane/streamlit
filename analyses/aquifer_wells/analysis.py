@@ -150,33 +150,37 @@ def main(context: AnalysisContext) -> None:
             else:
                 step.warning("Step 1: No sample observations found")
 
-        with executor.step(2, "Finding connected aquifers...") as step:
-            aquifers_df, error, debug = execute_aquifer_aquifers_query(**query_args)
-            step_info = build_query_debug_entry(
-                "Step 2: Aquifers", debug,
-                row_count=len(aquifers_df), error=error,
-            )
-            executed_queries.append(step_info)
-            if error:
-                step.error(f"Step 2 failed: {error}")
-            elif not aquifers_df.empty:
-                step.success(f"Step 2: Found {len(aquifers_df)} aquifer(s)")
-            else:
-                step.warning("Step 2: No aquifers found")
+        if samples_raw_df.empty:
+            st.warning("No sample points found — skipping aquifer and well queries. "
+                       "Without observations, aquifer/well results would be misleading.")
+        else:
+            with executor.step(2, "Finding connected aquifers...") as step:
+                aquifers_df, error, debug = execute_aquifer_aquifers_query(**query_args)
+                step_info = build_query_debug_entry(
+                    "Step 2: Aquifers", debug,
+                    row_count=len(aquifers_df), error=error,
+                )
+                executed_queries.append(step_info)
+                if error:
+                    step.error(f"Step 2 failed: {error}")
+                elif not aquifers_df.empty:
+                    step.success(f"Step 2: Found {len(aquifers_df)} aquifer(s)")
+                else:
+                    step.warning("Step 2: No aquifers found")
 
-        with executor.step(3, "Finding connected wells...") as step:
-            wells_df, error, debug = execute_aquifer_wells_query(**query_args)
-            step_info = build_query_debug_entry(
-                "Step 3: Connected Wells", debug,
-                row_count=len(wells_df), error=error,
-            )
-            executed_queries.append(step_info)
-            if error:
-                step.error(f"Step 3 failed: {error}")
-            elif not wells_df.empty:
-                step.success(f"Step 3: Found {len(wells_df)} well(s)")
-            else:
-                step.warning("Step 3: No connected wells found")
+            with executor.step(3, "Finding connected wells...") as step:
+                wells_df, error, debug = execute_aquifer_wells_query(**query_args)
+                step_info = build_query_debug_entry(
+                    "Step 3: Connected Wells", debug,
+                    row_count=len(wells_df), error=error,
+                )
+                executed_queries.append(step_info)
+                if error:
+                    step.error(f"Step 3 failed: {error}")
+                elif not wells_df.empty:
+                    step.success(f"Step 3: Found {len(wells_df)} well(s)")
+                else:
+                    step.warning("Step 3: No connected wells found")
 
         # Aggregate raw samples for map popups
         _LITE_THRESHOLD = 20_000

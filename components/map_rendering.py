@@ -236,17 +236,8 @@ def sample_point_style(feature: Dict[str, Any]) -> Dict[str, Any]:
 
     fill_color = _concentration_to_color(max_val)
 
-    radius = 4
-    if max_val is not None:
-        try:
-            v = float(max_val)
-            if v > 0:
-                radius = 4 if v < 40 else (v / 16 if v < 160 else 12)
-        except (ValueError, TypeError):
-            pass
-
     return {
-        "radius": max(3, min(12, radius)),
+        "radius": 6,
         "fillColor": fill_color,
         "color": "DimGray",
         "fillOpacity": 0.7,

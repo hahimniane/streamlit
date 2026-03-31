@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import streamlit as st
 import pandas as pd
+from folium.plugins import StripePattern
 
 from analysis_registry import AnalysisContext
 from analyses.aquifer_wells.queries import (
@@ -304,10 +305,12 @@ def _render_map(samples_agg_df, aquifers_df, wells_df, boundaries, context, use_
         add_boundary_layers(map_obj, boundaries, context.region_code)
 
         if aquifers_gdf is not None and not aquifers_gdf.empty:
+            sp = StripePattern(angle=-30, color=COLOR_AQUIFER, space_color='white', space_opacity=0.75)
+            sp.add_to(map_obj)
             aquifers_gdf.explore(
                 m=map_obj,
                 color=COLOR_AQUIFER,
-                style_kwds={"fillOpacity": 0.15, "weight": 2.5, "color": COLOR_AQUIFER},
+                style_kwds={"weight": 2.5, "style_function": lambda x: {"fillPattern": sp}},
                 popup=["aquifer"],
                 tooltip=False,
                 name=f'<span style="color: {COLOR_AQUIFER};">Aquifers</span>',
@@ -333,7 +336,9 @@ def _render_map(samples_agg_df, aquifers_df, wells_df, boundaries, context, use_
             )
 
         finalize_map(map_obj)
-        render_folium_map(map_obj)
+        import streamlit.components.v1 as components
+        map_html = map_obj._repr_html_()
+        components.html(map_html, height=600)
         render_map_legend([
             "**Striped areas** = Aquifers connected to sample points",
             "**Purple-to-orange circles** = Sample points (color = concentration level)",

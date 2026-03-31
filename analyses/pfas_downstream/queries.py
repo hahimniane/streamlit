@@ -137,8 +137,9 @@ PREFIX owl: <http://www.w3.org/2002/07/owl#>
 
 SELECT DISTINCT ?downstream_flowline ?dsflWKT ?fl_type ?streamName
 WHERE {{
-    {{SELECT ?s2 WHERE {{
+    {{SELECT DISTINCT ?s2 WHERE {{
         ?s2 spatial:connectedTo ?facility.
+        ?s2 rdf:type kwg-ont:S2Cell_Level13 .
         {facility_values_clause}
         ?facility fio:ofIndustry ?industryGroup;
             fio:ofIndustry ?industryCode;
@@ -220,6 +221,7 @@ SELECT DISTINCT ?samplePoint ?samplePointName ?spWKT
 WHERE {{
     {{ SELECT DISTINCT ?s2cell WHERE {{
         ?s2origin spatial:connectedTo ?facility.
+        ?s2origin rdf:type kwg-ont:S2Cell_Level13 .
         {facility_values_clause}
         ?facility fio:ofIndustry ?industryGroup;
             fio:ofIndustry ?industryCode;

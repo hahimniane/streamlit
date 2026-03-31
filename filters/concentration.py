@@ -264,7 +264,7 @@ SELECT (MAX(?numericValue) as ?max) WHERE {{
     {region_pattern}
     ?observation rdf:type coso:ContaminantObservation ;
                 coso:observedAtSamplePoint ?sp ;
-                coso:ofSubstance ?substance ;
+                coso:ofDSSToxSubstance ?substance ;
                 coso:analyzedSample ?sample ;
                 coso:hasResult ?result .
     ?sample coso:sampleOfMaterialType ?matType .

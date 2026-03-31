@@ -86,7 +86,7 @@ def run_upstream(
         ?waterbody a hyf:HY_WaterBody .
         ?observation rdf:type coso:ContaminantObservation ;
                     coso:observedAtSamplePoint ?sp ;
-                    coso:ofSubstance ?substance ;
+                    coso:ofDSSToxSubstance ?substance ;
                     coso:analyzedSample ?sample ;
                     coso:hasResult ?result .
         ?sample coso:sampleOfMaterialType ?matType .
@@ -141,7 +141,7 @@ WHERE {{
     ?waterbody a hyf:HY_WaterBody .
     ?observation rdf:type coso:ContaminantObservation ;
                 coso:observedAtSamplePoint ?samplePoint ;
-                coso:ofSubstance ?substanceURI ;
+                coso:ofDSSToxSubstance ?substanceURI ;
                 coso:analyzedSample ?sample ;
                 coso:hasResult ?resultNode .
     ?substanceURI rdfs:label ?substance .

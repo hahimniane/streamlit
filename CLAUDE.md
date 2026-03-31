@@ -20,6 +20,9 @@ A Streamlit app for exploring PFAS contamination via the SAWGraph knowledge grap
 6. **Always** register a new analysis in `analysis_registry.py` before it is considered complete.
 7. **Never** create standalone scripts or one-off utilities unless explicitly asked.
 8. **Never** add a `queries.py` entry point other than named functions that return `(df, error, debug_info)` or the upstream tuple shape described below.
+9. **Always** use `coso:ofDSSToxSubstance` (not `coso:ofSubstance`) when querying substance observations. Only DSSTox substances are valid — using `coso:ofSubstance` returns duplicates and non-standard entries.
+10. **Always** filter inner SELECT subqueries to `?s2 rdf:type kwg-ont:S2Cell_Level13` and use `SELECT DISTINCT` when finding S2 cells connected to facilities or sample points. Without this filter, the query returns admin regions and other non-S2 entities, causing massive slowdowns and duplicate results.
+11. **Always** stop multi-step query execution early if the first step returns no results. Later steps depend on the first step's data, and showing results without that context is misleading.
 
 ---
 

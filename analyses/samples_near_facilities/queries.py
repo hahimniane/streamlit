@@ -149,7 +149,7 @@ WHERE {{
     OPTIONAL {{ ?samplePoint rdfs:label ?samplePointName }}
     ?observation rdf:type coso:ContaminantObservation;
         coso:observedAtSamplePoint ?samplePoint;
-        coso:ofSubstance ?substance1;
+        coso:ofDSSToxSubstance ?substance1;
         coso:analyzedSample ?sample;
         coso:hasResult ?resultNode.
     OPTIONAL {{ ?observation coso:observedTime ?date }}

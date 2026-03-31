@@ -51,7 +51,7 @@ def _build_contamination_subquery(
             kwg-ont:sfWithin ?samples2 .
         ?obs rdf:type coso:ContaminantObservation ;
              coso:observedAtSamplePoint ?sp ;
-             coso:ofSubstance ?substance ;
+             coso:ofDSSToxSubstance ?substance ;
              coso:hasResult ?result .
         ?result coso:measurementValue ?result_value ;
                 coso:measurementUnit ?unit .
@@ -116,7 +116,7 @@ WHERE {{
 
     ?obs rdf:type coso:ContaminantObservation ;
          coso:observedAtSamplePoint ?samplePoint ;
-         coso:ofSubstance ?substanceURI ;
+         coso:ofDSSToxSubstance ?substanceURI ;
          coso:hasResult ?resultNode .
     ?substanceURI rdfs:label|skos:altLabel ?substance .
     ?resultNode coso:measurementValue ?result ;
@@ -253,7 +253,7 @@ WHERE {{
     VALUES ?sp {{ {uri_safe} }}
     ?obs rdf:type coso:ContaminantObservation ;
          coso:observedAtSamplePoint ?sp ;
-         coso:ofSubstance ?substance ;
+         coso:ofDSSToxSubstance ?substance ;
          coso:observedTime ?obs_date ;
          coso:hasResult ?result .
     ?result coso:measurementValue ?result_value .

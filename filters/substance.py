@@ -62,7 +62,7 @@ SELECT ?substance (SAMPLE(?_label) AS ?label) (SAMPLE(?_short_label) AS ?short_l
     {region_pattern}
     ?observation rdf:type coso:ContaminantObservation ;
                 coso:observedAtSamplePoint ?sp ;
-                coso:ofSubstance ?substance .
+                coso:ofDSSToxSubstance ?substance .
     ?substance rdf:type comptox:ChemicalEntity .
     ?substance dcterms:alternative ?_label .
     OPTIONAL {{ ?substance skos:altLabel ?_short_label . }}

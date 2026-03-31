@@ -581,7 +581,7 @@ PREFIX rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#>
 
 SELECT DISTINCT ?substance ?substanceLabel (COUNT(?obs) as ?count) WHERE {
     ?obs rdf:type coso:ContaminantObservation;
-         coso:ofSubstance ?substance;
+         coso:ofDSSToxSubstance ?substance;
          coso:hasResult ?result.
     ?substance rdfs:label ?substanceLabel.
     ?result coso:measurementValue ?value.

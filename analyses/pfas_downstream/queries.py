@@ -248,13 +248,13 @@ WHERE {{
         geo:hasGeometry/geo:asWKT ?spWKT .
     OPTIONAL {{ ?samplePoint rdfs:label ?samplePointName }}
     ?s2cell rdf:type kwg-ont:S2Cell_Level13.
-    ?sample coso:fromSamplePoint ?samplePoint .
-    OPTIONAL {{ ?sample dcterms:identifier ?sampleIdentifier }}
-    OPTIONAL {{ ?sample coso:sampleOfMaterialType/rdfs:label ?sampleType }}
     ?observation rdf:type coso:ContaminantObservation;
         coso:observedAtSamplePoint ?samplePoint;
+        coso:analyzedSample ?sample ;
         coso:ofDSSToxSubstance/skos:altLabel ?substance;
         coso:hasResult ?res .
+    OPTIONAL {{ ?sample dcterms:identifier ?sampleIdentifier }}
+    OPTIONAL {{ ?sample coso:sampleOfMaterialType/rdfs:label ?sampleType }}
     OPTIONAL {{ ?observation coso:observedTime ?date }}
     ?res coso:measurementValue ?result;
         coso:measurementUnit/qudt:symbol ?unit.

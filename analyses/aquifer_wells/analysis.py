@@ -341,7 +341,7 @@ def _render_map(samples_agg_df, aquifers_df, wells_df, boundaries, context, use_
         components.html(map_html, height=600)
         render_map_legend([
             "**Striped areas** = Aquifers connected to sample points",
-            "**Purple-to-orange circles** = Sample points (color = concentration level)",
+            "**Orange circles** = Sample points",
             "**Dark blue circles** = Potentially connected water wells",
             "**Boundary outline** = Selected region",
         ])

@@ -338,7 +338,7 @@ def _render_map(facilities_df, samples_agg_df, industry_display, boundaries, que
         render_map_legend([
             "**Boundary** = Selected region",
             "**Red markers** = Facilities of selected industry type",
-            "**Purple-to-orange markers** = PFAS sample points nearby (color = concentration level)"
+            "**Orange circles** = PFAS sample points nearby"
         ])
 
     except Exception as e:

@@ -226,19 +226,10 @@ def _concentration_to_color(value) -> str:
 
 
 def sample_point_style(feature: Dict[str, Any]) -> Dict[str, Any]:
-    """Shared marker style for sample points using the PuOr concentration palette.
-
-    Reads ``overall_max_result`` from feature properties to determine both
-    fill color (PuOr palette) and radius (scaled by concentration).
-    """
-    props = (feature or {}).get("properties", {}) or {}
-    max_val = props.get("overall_max_result")
-
-    fill_color = _concentration_to_color(max_val)
-
+    """Shared marker style for sample points — single orange color."""
     return {
         "radius": 6,
-        "fillColor": fill_color,
+        "fillColor": COLOR_SAMPLE,
         "color": "DimGray",
         "fillOpacity": 0.7,
         "opacity": 0.3,

@@ -418,7 +418,7 @@ def _render_map(samples_agg_df, facilities_df, upstream_s2_df, upstream_flowline
     finalize_map(map_obj)
     render_folium_map(map_obj)
     render_map_legend([
-        "**Purple-to-orange circles** = PFAS sample locations (color = concentration level)",
+        "**Orange circles** = PFAS sample locations",
         "**Blue lines** = Upstream flow paths",
         "**Red markers** = Upstream facilities (by industry)",
         "**Boundary outline** = Selected region"

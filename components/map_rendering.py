@@ -60,7 +60,7 @@ COLOR_FLOWLINE = "#2b8cbe"
 COLOR_WELL = "#045a8d"
 
 # Sample points — PuOr diverging palette (purple=low, orange=high concentration)
-COLOR_SAMPLE = "#fdb863"
+COLOR_SAMPLE = "#e08214"
 SAMPLE_PUOR_PALETTE = [
     "#542788",  # purple extreme  — non-detect / zero
     "#8073ac",  #                 — 0 < c ≤ 4 ng/L

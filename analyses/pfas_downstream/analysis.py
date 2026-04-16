@@ -79,6 +79,15 @@ def main(context: AnalysisContext) -> None:
     state.init_if_missing("executed_queries", [])
 
     # === SIDEBAR PARAMETERS ===
+    st.sidebar.markdown("### Query Parameters")
+
+    selected_substance_uri, selected_substance_name = render_sidebar_substance_selector(
+        region_code=context.region_code,
+        analysis_key=context.analysis_key,
+    )
+
+    st.sidebar.markdown("---")
+
     selected_naics_code, selected_industry_display = render_sidebar_industry_selector(
         analysis_key=context.analysis_key,
         heading="### Industry Type",
@@ -87,12 +96,9 @@ def main(context: AnalysisContext) -> None:
         empty_label="Not Selected",
     )
 
-    conc_filter = render_concentration_filter(context.analysis_key)
+    st.sidebar.markdown("---")
 
-    selected_substance_uri, selected_substance_name = render_sidebar_substance_selector(
-        region_code=context.region_code,
-        analysis_key=context.analysis_key,
-    )
+    conc_filter = render_concentration_filter(context.analysis_key)
 
     # Execute button
     can_execute, missing = check_required_fields(industry=selected_naics_code)

@@ -16,7 +16,6 @@ import pandas as pd
 
 from core.sparql import (
     build_query_debug_entry,
-    concentration_filter_sparql,
     parse_sparql_results,
     post_sparql_with_debug,
     region_pattern_sparql,
@@ -37,12 +36,77 @@ def _build_region_clause(region_code: Optional[str]) -> str:
     ?samples2 spatial:connectedTo ?regionURI ."""
 
 
+def _build_result_block(min_conc: float, max_conc: float, include_nondetects: bool) -> str:
+    """Build the SPARQL observation result block following the correct ontology pattern.
+
+    Numeric value extraction, concentration filtering, and unit filtering are
+    grouped inside an OPTIONAL so that non-detects (which lack numeric values)
+    are not excluded.
+
+    When include_nondetects is False, the numeric part is made mandatory so
+    rows without numeric values are naturally excluded.
+    """
+    if include_nondetects:
+        return f"""    ?resultNode qudt:quantityValue ?value .
+    OPTIONAL {{
+        ?value qudt:numericValue ?numericValue .
+        FILTER (?numericValue >= {min_conc})
+        FILTER (?numericValue <= {max_conc})
+        ?value qudt:hasUnit ?unitURI .
+        VALUES ?unitURI {{ <http://qudt.org/vocab/unit/NanoGM-PER-L> }}
+        ?unitURI qudt:symbol ?unit .
+    }}
+    OPTIONAL {{ ?value qudt:enumeratedValue ?enumeratedValue . }}
+    BIND(COALESCE(?numericValue, "0"^^xsd:decimal) AS ?result)"""
+    return f"""    ?resultNode qudt:quantityValue ?value .
+    ?value qudt:numericValue ?numericValue .
+    FILTER (?numericValue >= {min_conc})
+    FILTER (?numericValue <= {max_conc})
+    ?value qudt:hasUnit ?unitURI .
+    VALUES ?unitURI {{ <http://qudt.org/vocab/unit/NanoGM-PER-L> }}
+    ?unitURI qudt:symbol ?unit .
+    BIND(?numericValue AS ?result)"""
+
+
+def _build_contamination_result_block(min_conc: float, max_conc: float, include_nondetects: bool) -> str:
+    """Build a result block for the contamination subquery (Steps 2 & 3).
+
+    Same pattern as _build_result_block but without unit symbol binding
+    since the subquery only needs to filter, not display results.
+    """
+    if include_nondetects:
+        return f"""        ?result qudt:quantityValue ?value .
+        OPTIONAL {{
+            ?value qudt:numericValue ?numericValue .
+            FILTER (?numericValue >= {min_conc})
+            FILTER (?numericValue <= {max_conc})
+            ?value qudt:hasUnit ?unitURI .
+            VALUES ?unitURI {{ <http://qudt.org/vocab/unit/NanoGM-PER-L> }}
+        }}
+        OPTIONAL {{ ?value qudt:enumeratedValue ?enumeratedValue . }}"""
+    return f"""        ?result qudt:quantityValue ?value .
+        ?value qudt:numericValue ?numericValue .
+        FILTER (?numericValue >= {min_conc})
+        FILTER (?numericValue <= {max_conc})
+        ?value qudt:hasUnit ?unitURI .
+        VALUES ?unitURI {{ <http://qudt.org/vocab/unit/NanoGM-PER-L> }}"""
+
+
+_SUBSTANCE_LABEL_BLOCK = """    OPTIONAL { ?substanceURI skos:altLabel ?shortLabel . }
+    OPTIONAL { ?substanceURI dcterms:alternative ?altLabel . }
+    OPTIONAL { ?substanceURI rdfs:label ?fullLabel . }
+    BIND(COALESCE(?shortLabel, ?altLabel, ?fullLabel) AS ?substance)"""
+
+
 def _build_contamination_subquery(
     region_clause: str,
     substance_filter: str,
-    conc_filter: str,
+    min_conc: float,
+    max_conc: float,
+    include_nondetects: bool,
 ) -> str:
     """Build a reusable subquery that finds S2 cells with contaminated EGAD PWSW sample points."""
+    result_block = _build_contamination_result_block(min_conc, max_conc, include_nondetects)
     return f"""SELECT DISTINCT ?samples2 WHERE {{
         {region_clause}
         ?samples2 rdf:type kwg-ont:S2Cell_Level13 .
@@ -53,15 +117,8 @@ def _build_contamination_subquery(
              coso:observedAtSamplePoint ?sp ;
              coso:ofDSSToxSubstance ?substance ;
              coso:hasResult ?result .
-        ?result coso:measurementValue ?result_value ;
-                coso:measurementUnit ?unit .
-        OPTIONAL {{ ?result qudt:quantityValue/qudt:numericValue ?numericResult }}
-        OPTIONAL {{ ?result qudt:enumeratedValue ?enumDetected }}
-        BIND( (BOUND(?enumDetected) || LCASE(STR(?result_value)) = "non-detect" || STR(?result_value) = STR(coso:non-detect)) AS ?isNonDetect )
-        BIND( IF(?isNonDetect, 0, COALESCE(xsd:decimal(?numericResult), xsd:decimal(?result_value))) AS ?numericValue )
-        VALUES ?unit {{ <http://qudt.org/vocab/unit/NanoGM-PER-L> }}
         {substance_filter}
-        {conc_filter}
+{result_block}
     }}"""
 
 
@@ -95,8 +152,8 @@ def execute_aquifer_samples_query(
     spWKT, sample, sampleIdentifier, date, substance, result, unit, sampleType.
     """
     region_clause = _build_region_clause(region_code)
-    substance_filter = sparql_values_uri("substance", substance_uri)
-    conc_filter = concentration_filter_sparql(min_conc, max_conc, include_nondetects)
+    substance_filter = sparql_values_uri("substanceURI", substance_uri)
+    result_block = _build_result_block(min_conc, max_conc, include_nondetects)
 
     query = f"""{_PREFIXES}
 
@@ -118,22 +175,15 @@ WHERE {{
          coso:observedAtSamplePoint ?samplePoint ;
          coso:ofDSSToxSubstance ?substanceURI ;
          coso:hasResult ?resultNode .
-    ?substanceURI rdfs:label|skos:altLabel ?substance .
-    ?resultNode coso:measurementValue ?result ;
-               coso:measurementUnit ?unitURI .
-    ?unitURI qudt:symbol ?unit .
-    OPTIONAL {{ ?resultNode qudt:quantityValue/qudt:numericValue ?numericResult }}
-    OPTIONAL {{ ?resultNode qudt:enumeratedValue ?enumDetected }}
-    BIND( (BOUND(?enumDetected) || LCASE(STR(?result)) = "non-detect" || STR(?result) = STR(coso:non-detect)) AS ?isNonDetect )
-    BIND( IF(?isNonDetect, 0, COALESCE(xsd:decimal(?numericResult), xsd:decimal(?result))) AS ?numericValue )
-    VALUES ?unitURI {{ <http://qudt.org/vocab/unit/NanoGM-PER-L> }}
     {substance_filter}
-    {conc_filter}
+{result_block}
 
     OPTIONAL {{ ?obs coso:analyzedSample ?sample }}
     OPTIONAL {{ ?sample dcterms:identifier ?sampleIdentifier }}
     OPTIONAL {{ ?obs coso:observedTime ?date }}
     OPTIONAL {{ ?sample coso:sampleOfMaterialType/rdfs:label ?sampleType }}
+
+{_SUBSTANCE_LABEL_BLOCK}
 }}
 """
     js, error, debug_info = post_sparql_with_debug("federation", query, timeout=timeout)
@@ -156,8 +206,9 @@ def execute_aquifer_aquifers_query(
     """
     region_clause = _build_region_clause(region_code)
     substance_filter = sparql_values_uri("substance", substance_uri)
-    conc_filter = concentration_filter_sparql(min_conc, max_conc, include_nondetects)
-    contamination_subquery = _build_contamination_subquery(region_clause, substance_filter, conc_filter)
+    contamination_subquery = _build_contamination_subquery(
+        region_clause, substance_filter, min_conc, max_conc, include_nondetects,
+    )
 
     query = f"""{_PREFIXES}
 
@@ -191,8 +242,9 @@ def execute_aquifer_wells_query(
     """
     region_clause = _build_region_clause(region_code)
     substance_filter = sparql_values_uri("substance", substance_uri)
-    conc_filter = concentration_filter_sparql(min_conc, max_conc, include_nondetects)
-    contamination_subquery = _build_contamination_subquery(region_clause, substance_filter, conc_filter)
+    contamination_subquery = _build_contamination_subquery(
+        region_clause, substance_filter, min_conc, max_conc, include_nondetects,
+    )
 
     query = f"""{_PREFIXES}
 
@@ -219,12 +271,10 @@ WHERE {{
     df = parse_sparql_results(js) if js else pd.DataFrame()
 
     if not df.empty:
-        # Extract local name from IRI (portion after last ".")
         for iri_col, name_col in [("welluseiri", "Well Use"), ("welltypeiri", "Well Type")]:
             if iri_col in df.columns:
                 df[name_col] = df[iri_col].str.extract(r'\.([^.]+)$', expand=False)
                 df.drop(columns=[iri_col], inplace=True)
-        # Convert depth columns to numeric and rename with units
         for raw_col, display_col in [("welldepth", "Well Depth (ft)"), ("welloverburden", "Overburden (ft)")]:
             if raw_col in df.columns:
                 df[display_col] = pd.to_numeric(df[raw_col], errors="coerce")

@@ -83,7 +83,7 @@ def main(context: AnalysisContext) -> None:
 
     conc_filter = render_concentration_filter(context.analysis_key, default_max=500)
 
-    can_execute, missing = check_required_fields(state=context.selected_state_code)
+    can_execute, missing = check_required_fields(state=context.selected_state_code, county=context.selected_county_code)
     execute_clicked = render_execute_button(
         disabled=not can_execute,
         missing_fields=missing,

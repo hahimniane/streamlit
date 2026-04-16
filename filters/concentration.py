@@ -61,7 +61,7 @@ def render_concentration_filter(
     if conc_max_key not in st.session_state:
         st.session_state[conc_max_key] = default_max
     if include_nondetects_key not in st.session_state:
-        st.session_state[include_nondetects_key] = False
+        st.session_state[include_nondetects_key] = True
     if include_nondetects_pending_key not in st.session_state:
         st.session_state[include_nondetects_pending_key] = st.session_state[include_nondetects_key]
     
@@ -186,7 +186,7 @@ def apply_concentration_filter(analysis_key: str) -> Tuple[int, int, bool]:
     max_pending_key = f"{analysis_key}_conc_max_pending"
     
     # Apply pending values
-    st.session_state[include_nondetects_key] = st.session_state.get(include_nondetects_pending_key, False)
+    st.session_state[include_nondetects_key] = st.session_state.get(include_nondetects_pending_key, True)
     
     min_concentration = max(0, int(st.session_state.get(min_pending_key, 0)))
     max_concentration = max(0, int(st.session_state.get(max_pending_key, 0)))

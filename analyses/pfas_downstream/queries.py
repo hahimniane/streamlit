@@ -17,6 +17,7 @@ from core.sparql import (
     build_county_region_filter,
     build_facility_values,
     concentration_filter_sparql,
+    sparql_values_uri,
 )
 from core.naics_utils import normalize_naics_codes, build_naics_values_and_hierarchy
 
@@ -177,6 +178,7 @@ def execute_downstream_samples_query(
     min_conc: float = 0.0,
     max_conc: float = 500.0,
     include_nondetects: bool = False,
+    substance_uri: Optional[str] = None,
 ) -> Tuple[pd.DataFrame, Optional[str], Dict[str, Any]]:
     """Step 3: Find raw per-observation sample rows downstream of facilities.
 
@@ -198,6 +200,7 @@ def execute_downstream_samples_query(
         return pd.DataFrame(), "Industry type is required", {"error": "No industry selected"}
 
     conc_filter = concentration_filter_sparql(min_conc, max_conc, include_nondetects)
+    subst_filter = sparql_values_uri("substanceURI", substance_uri)
 
     query = f"""
 PREFIX dcterms: <http://purl.org/dc/terms/>
@@ -251,8 +254,10 @@ WHERE {{
     ?observation rdf:type coso:ContaminantObservation;
         coso:observedAtSamplePoint ?samplePoint;
         coso:analyzedSample ?sample ;
-        coso:ofDSSToxSubstance/skos:altLabel ?substance;
+        coso:ofDSSToxSubstance ?substanceURI ;
         coso:hasResult ?res .
+    {subst_filter}
+    ?substanceURI skos:altLabel ?substance .
     OPTIONAL {{ ?sample dcterms:identifier ?sampleIdentifier }}
     OPTIONAL {{ ?sample coso:sampleOfMaterialType/rdfs:label ?sampleType }}
     OPTIONAL {{ ?observation coso:observedTime ?date }}

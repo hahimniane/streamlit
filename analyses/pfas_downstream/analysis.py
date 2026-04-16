@@ -15,6 +15,7 @@ from analyses.pfas_downstream.queries import (
 )
 from filters.industry import render_sidebar_industry_selector
 from filters.concentration import render_concentration_filter, apply_concentration_filter
+from filters.substance import render_sidebar_substance_selector
 
 # Shared components
 from core.boundary import fetch_boundaries
@@ -88,6 +89,11 @@ def main(context: AnalysisContext) -> None:
 
     conc_filter = render_concentration_filter(context.analysis_key)
 
+    selected_substance_uri, selected_substance_name = render_sidebar_substance_selector(
+        region_code=context.region_code,
+        analysis_key=context.analysis_key,
+    )
+
     # Execute button
     can_execute, missing = check_required_fields(industry=selected_naics_code)
     execute_clicked = render_execute_button(
@@ -104,7 +110,7 @@ def main(context: AnalysisContext) -> None:
         max_conc=conc_filter.max_concentration,
         include_nondetects=conc_filter.include_nondetects,
         naics_prefix2=naics_prefix2_from_code(selected_naics_code),
-        has_substance_filter=False,
+        has_substance_filter=selected_substance_uri is not None,
         has_material_filter=False,
     )
     render_simple_eta(estimate_eta(preview_request))
@@ -121,6 +127,7 @@ def main(context: AnalysisContext) -> None:
             params_data = [
                 build_industry_params(selected_industry_display),
                 build_region_params(context.region_display, default_label="All Regions"),
+                {"Parameter": "PFAS Substance", "Value": selected_substance_name or "All Substances"},
                 build_concentration_params(min_conc, max_conc, include_nondetects=False),
                 {"Parameter": "Include nondetects", "Value": "Yes" if include_nondetects else "No"},
             ]
@@ -136,7 +143,7 @@ def main(context: AnalysisContext) -> None:
                 max_conc=max_conc,
                 include_nondetects=include_nondetects,
                 naics_prefix2=naics_prefix2_from_code(selected_naics_code),
-                has_substance_filter=False,
+                has_substance_filter=selected_substance_uri is not None,
                 has_material_filter=False,
             )
             run_eta = estimate_eta(run_request)
@@ -192,7 +199,8 @@ def main(context: AnalysisContext) -> None:
                 with executor.step(3, "Finding downstream samples...") as step:
                     samples_df, error, debug = execute_downstream_samples_query(
                         naics_code=selected_naics_code, region_code=context.region_code,
-                        min_conc=min_conc, max_conc=max_conc, include_nondetects=include_nondetects)
+                        min_conc=min_conc, max_conc=max_conc, include_nondetects=include_nondetects,
+                        substance_uri=selected_substance_uri)
                     step_info = build_query_debug_entry(
                         "Step 3: Downstream Samples",
                         debug,

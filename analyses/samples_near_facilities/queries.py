@@ -11,6 +11,7 @@ from core.sparql import (
     concentration_filter_sparql,
     parse_sparql_results,
     post_sparql_with_debug,
+    sparql_values_uri,
 )
 from core.naics_utils import build_naics_values_and_hierarchy, normalize_naics_codes
 
@@ -96,6 +97,7 @@ def execute_nearby_samples_query(
     min_concentration: float = 0.0,
     max_concentration: float = 500.0,
     include_nondetects: bool = False,
+    substance_uri: Optional[str] = None,
 ) -> Tuple[pd.DataFrame, Optional[str], Dict[str, Any]]:
     """Step 2: Find raw per-observation PFAS sample rows near industry facilities.
 
@@ -105,6 +107,7 @@ def execute_nearby_samples_query(
     industry_values, industry_hierarchy = _build_industry_filter(naics_code)
     region_filter = _build_region_filter(region_code)
     conc_filter = concentration_filter_sparql(min_concentration, max_concentration, include_nondetects)
+    subst_filter = sparql_values_uri("substance1", substance_uri)
 
     query = f"""
 PREFIX xsd: <http://www.w3.org/2001/XMLSchema#>
@@ -170,6 +173,7 @@ WHERE {{
         COALESCE(xsd:decimal(?numericResult), xsd:decimal(?result))
       ) as ?numericValue
     )
+    {subst_filter}
     ?substance1 rdfs:label ?substance.
     ?unitURI qudt:symbol ?unit.
     {conc_filter}

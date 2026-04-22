@@ -75,20 +75,20 @@ def run_upstream(
 
     sample_s2_subquery = f"""
     SELECT DISTINCT ?s2cell WHERE {{
-        ?sp rdf:type coso:SamplePoint ;// sp is a sample point
+        ?sp rdf:type coso:SamplePoint ;
             spatial:connectedTo ?regionURI ;
             spatial:connectedTo ?s2 .
-        {region_pattern} // region_pattern is the pattern of the region that the sample point is in
-        ?s2 rdf:type kwg-ont:S2Cell_Level13 . // s2 is a S2 cell
-        ?s2cell rdf:type kwg-ont:S2Cell_Level13 ;// s2cell is a S2 cell
-                kwg-ont:sfTouches | owl:sameAs ?s2 ; // ?s2cell touches or is the same as s2
-                spatial:connectedTo ?waterbody .    // ?waterbody is a water body
-        ?waterbody a hyf:HY_WaterBody .            // ?waterbody is a water body
-        ?observation rdf:type coso:ContaminantObservation ; // ?observation is a contaminant observation 
-                    coso:observedAtSamplePoint ?sp ; // ?observation is observed at the sample point
-                    coso:ofDSSToxSubstance ?substance ; // ?observation is of the substance
-                    coso:analyzedSample ?sample ; // ?observation is analyzed by the sample
-                    coso:hasResult ?result .        // ?observation has the result
+        {region_pattern} 
+        ?s2 rdf:type kwg-ont:S2Cell_Level13 . 
+        ?s2cell rdf:type kwg-ont:S2Cell_Level13 ;
+                kwg-ont:sfTouches | owl:sameAs ?s2 ; 
+                spatial:connectedTo ?waterbody .    
+        ?waterbody a hyf:HY_WaterBody .            
+        ?observation rdf:type coso:ContaminantObservation ; 
+                    coso:observedAtSamplePoint ?sp ; 
+                    coso:ofDSSToxSubstance ?substance ; 
+                    coso:analyzedSample ?sample ; 
+                    coso:hasResult ?result .        
         ?sample coso:sampleOfMaterialType ?matType .
         ?result coso:measurementValue ?result_value ;
                 coso:measurementUnit ?unit .
